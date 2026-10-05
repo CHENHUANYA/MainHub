@@ -440,8 +440,11 @@ function renderSystemSettings(settings) {
   if (!app || !settings) {
     return;
   }
-  app.$('settingsDefaultManual').value = settings.default_manual || '808d';
+  app.setState('systemSettings', settings);
+  app.setState('defaultManual', settings.default_manual);
+  app.$('settingsDefaultManual').value = settings.default_manual || window.AlarmApp.getState('defaultManual');
   app.$('settingsSessionHours').value = String(settings.session_hours || 12);
+  app.$('settingsSessionHours').disabled = settings.session_hours_source === 'environment';
   app.$('settingsAllowOperatorReopen').checked = Boolean(settings.allow_operator_reopen);
   const updatedBy = settings.updated_by ? `，最後更新：${settings.updated_by}` : '';
   setSettingsResult(`設定已載入${updatedBy}`);
@@ -469,8 +472,9 @@ async function saveSystemSettings() {
     return;
   }
   const payload = {
+    expected_revision: app.getState('systemSettings')?.revision || '',
     default_manual: app.$('settingsDefaultManual').value,
-    session_hours: Number(app.$('settingsSessionHours').value || 12),
+    session_hours: app.$('settingsSessionHours').disabled ? undefined : Number(app.$('settingsSessionHours').value || 12),
     allow_operator_reopen: app.$('settingsAllowOperatorReopen').checked,
   };
   try {
@@ -599,7 +603,7 @@ async function createWorkOrder() {
       app.$(id).value = '';
     });
     app.$('woPriority').value = 'medium';
-    app.$('woManual').value = '808d';
+    app.$('woManual').value = window.AlarmApp.getState('defaultManual');
     loadWorkOrders();
   } catch (error) {
     window.alert(app.formatError(error, '新增工單失敗'));
@@ -618,6 +622,7 @@ function openWoModal(id) {
   }
 
   app.setState('woCurrentId', id);
+  app.setState('woCurrentVersion', order.version);
   app.$('woModalTitle').textContent = `Alarm ${order.alarm_code}`;
   app.$('woModalId').textContent = `ID: ${order.id} · ${String(order.manual).toUpperCase()}`;
   app.$('woEditStatus').value = order.status;
@@ -646,6 +651,7 @@ function closeWoModal() {
 
   app.$('woModal').classList.remove('show');
   app.setState('woCurrentId', null);
+  app.setState('woCurrentVersion', undefined);
 }
 
 async function saveWorkOrder() {
@@ -661,14 +667,13 @@ async function saveWorkOrder() {
 
   const payload = {
     status: app.$('woEditStatus').value,
+    version: app.getState('woCurrentVersion'),
     priority: app.$('woEditPriority').value,
     assigned_to: app.$('woEditAssignee').value.trim(),
     machine_id: app.$('woEditMachine').value.trim(),
     description: app.$('woEditDesc').value.trim(),
     resolution: app.$('woEditResolution').value.trim(),
     notes: app.$('woEditNotes').value.trim(),
-    accepted_by: app.$('woEditAcceptedBy')?.value.trim() || '',
-    completed_by: app.$('woEditCompletedBy')?.value.trim() || '',
     root_cause: app.$('woEditRootCause')?.value.trim() || '',
     repair_action: app.$('woEditRepairAction')?.value.trim() || '',
     failure_category: app.$('woEditFailureCategory')?.value.trim() || '',
@@ -722,50 +727,16 @@ async function deleteWorkOrder() {
 
 async function uploadExcel(input) {
   const app = getApp();
-  if (!app) {
-    return;
-  }
-
-  const file = input.files[0];
-  if (!file) {
-    return;
-  }
-
-  const result = app.$('excelResult');
-  app.setResultMessage(result, 'excel-result show', `上傳中：${file.name}`);
-  result.classList.add('u-progress-info');
-
-  const formData = new FormData();
-  formData.append('file', file);
-
-  try {
-    const data = await app.apiJson('/work-orders/import-excel', {
-      method: 'POST',
-      body: formData,
-    });
-    if (data.status !== 'ok') {
-      throw new Error(data.message || 'Excel 匯入失敗');
-    }
-
-    let message = `匯入完成：${data.filename}\n`;
-    message += `成功匯入：${data.imported} 筆\n`;
-    message += `略過：${data.skipped} 筆\n`;
-    if (data.candidate_count) {
-      message += `待審核候選知識：${data.candidate_count} 筆\n`;
-    }
-    if (data.errors?.length) {
-      message += `錯誤：${data.errors.join(', ')}\n`;
-    }
-    app.setResultMessage(result, 'excel-result show ok', message);
-    result.classList.remove('u-progress-info');
-    loadWorkOrders();
-    loadCollectionDocuments();
-  } catch (error) {
-    app.setResultMessage(result, 'excel-result show err', app.formatError(error, 'Excel 匯入失敗'));
-    result.classList.remove('u-progress-info');
-  } finally {
-    input.value = '';
-  }
+  if (!app) return;
+  await window.previewWorkOrderExcel({
+    input, result: app.$('excelResult'),
+    request: (path, options) => app.apiJson(path, options),
+    onSuccess: async () => {
+      await loadWorkOrders();
+      await loadCollectionDocuments();
+    },
+    formatError: (error, fallback) => app.formatError(error, fallback),
+  });
 }
 
 const operationsApp = getApp();

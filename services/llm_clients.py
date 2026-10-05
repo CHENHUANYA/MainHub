@@ -33,15 +33,6 @@ class OllamaClientConfig:
     context_tokens: int
 
 
-@dataclass(frozen=True)
-class SchoolClientConfig:
-    base_url: str
-    api_key: str
-    model: str
-    timeout_seconds: float
-    max_output_tokens: int
-
-
 def _ollama_payload(
     messages: list[dict],
     temperature: float,
@@ -54,6 +45,9 @@ def _ollama_payload(
         "model": config.model,
         "messages": messages,
         "stream": stream,
+        # Gemma's default thinking can consume the bounded output budget before
+        # any answer content arrives. RAG needs the final, source-grounded text.
+        "think": False,
         "keep_alive": config.keep_alive,
         "options": {
             "temperature": temperature,
@@ -93,8 +87,8 @@ async def stream_ollama(
     started = time.monotonic()
     received_bytes = 0
     received_events = 0
-    async with httpx.AsyncClient(timeout=config.timeout_seconds) as client:
-        async with client.stream("POST", f"{config.url}/api/chat", json=payload) as response:
+    async with httpx.AsyncClient(timeout=config.timeout_seconds, trust_env=False) as client:
+        async with client.stream("POST", f"{config.url.rstrip('/')}/api/chat", json=payload) as response:
             response.raise_for_status()
             if on_connected is not None:
                 on_connected()
@@ -116,53 +110,3 @@ async def stream_ollama(
                 content = str(event.get("message", {}).get("content") or "")
                 if content:
                     yield content
-
-
-async def call_school_api(
-    messages: list[dict],
-    temperature: float,
-    max_tokens: int,
-    config: SchoolClientConfig,
-) -> str:
-    if not config.base_url:
-        raise RuntimeError("SCHOOL_API_BASE_URL is required when LLM_PROVIDER=school")
-    headers = {"Content-Type": "application/json"}
-    if config.api_key:
-        headers["Authorization"] = f"Bearer {config.api_key}"
-    payload = {
-        "model": config.model,
-        "messages": messages,
-        "stream": False,
-        "temperature": temperature,
-        "max_tokens": min(max_tokens, config.max_output_tokens),
-    }
-    max_bytes, max_events, total_timeout = _response_limits(config.timeout_seconds)
-    started = time.monotonic()
-    chunks: list[bytes] = []
-    received_bytes = 0
-    received_events = 0
-    async with httpx.AsyncClient(timeout=config.timeout_seconds) as client:
-        async with client.stream(
-            "POST",
-            f"{config.base_url}/chat/completions",
-            headers=headers,
-            json=payload,
-        ) as response:
-            response.raise_for_status()
-            async for chunk in response.aiter_bytes():
-                if time.monotonic() - started > total_timeout:
-                    raise RuntimeError("School API response exceeded total generation deadline")
-                if not chunk:
-                    continue
-                received_events += 1
-                received_bytes += len(chunk)
-                if received_events > max_events or received_bytes > max_bytes:
-                    raise RuntimeError("School API response exceeded configured size limits")
-                chunks.append(chunk)
-    try:
-        data = json.loads(b"".join(chunks))
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise RuntimeError("School API returned invalid JSON") from exc
-    if not isinstance(data, dict):
-        raise RuntimeError("School API returned invalid JSON")
-    return str(data.get("choices", [{}])[0].get("message", {}).get("content", ""))

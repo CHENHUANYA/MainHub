@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "company": {"id": "demo-compressor", "display_name": "空壓機示範工廠 B（模擬）"},
+  "default_collection": "compressor_demo",
+  "collections": [
+    {"id": "compressor_demo", "display_name": "空壓機示範 SOP", "domain": "compressor", "parser": "text_v1", "prompt_profile": "maintenance_v1"}
+  ],
+  "sites": [{"id": "site-b", "display_name": "示範廠區 B"}],
+  "lines": [{"id": "utilities", "display_name": "公用設備區", "site_id": "site-b"}],
+  "machines": [{"id": "AIR-01", "display_name": "示範空壓機", "model": "Demo Air", "line_id": "utilities", "collection": "compressor_demo"}],
+  "workflow": {"allow_operator_reopen": false}
+}

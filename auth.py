@@ -10,7 +10,7 @@ from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Cookie, Depends, Header, Query, Request, Response
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from api_schemas import (
     API_ERROR_RESPONSES,
@@ -102,7 +102,7 @@ FULL_ACCESS_ROLES = {"supervisor", "admin"}
 VERIFY_ROLES = {"operator", "supervisor"}
 SUPERVISOR_VISIBLE_ROLES = {"maintenance", "supervisor"}
 SESSION_TOKEN_PREFIX_LENGTH = 10
-SESSION_COOKIE_NAME = "alarm_rag_session"
+SESSION_COOKIE_NAME = auth_sessions.session_cookie_name(os.getenv("SESSION_COOKIE_NAME", ""))
 LOGIN_FAILURE_LIMIT = env_int("LOGIN_FAILURE_LIMIT", 5, minimum=1, maximum=100)
 LOGIN_FAILURE_WINDOW_SECONDS = env_int("LOGIN_FAILURE_WINDOW_SECONDS", 300, minimum=1, maximum=86_400)
 LOGIN_LOCKOUT_SECONDS = env_int("LOGIN_LOCKOUT_SECONDS", 300, minimum=1, maximum=86_400)
@@ -129,6 +129,12 @@ class InitialPasswordChangeRequest(BaseModel):
     username: str
     current_password: str
     new_password: str
+
+
+class PersonalPasswordChangeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    current_password: str = Field(min_length=1, max_length=1024)
+    new_password: str = Field(min_length=8, max_length=1024)
 
 
 class LogoutRequest(BaseModel):
@@ -560,6 +566,8 @@ async def _api_reset_user_password(user_id: str, req: ResetPasswordRequest, acto
         return api_error("Not authenticated")
     if not is_admin(actor):
         return permission_denied()
+    if user_id.strip() == actor_id(actor):
+        return api_error("請使用頁首的更改密碼功能變更自己的密碼")
 
     users = load_users()
     key = user_id.strip()
@@ -576,7 +584,7 @@ async def _api_reset_user_password(user_id: str, req: ResetPasswordRequest, acto
     read_version = str(user.get("updated_at") or "") or None
     user["password_hash"] = hash_password(password)
     user["credential_epoch"] = credential_epoch(user) + 1
-    user["must_change_password"] = False
+    user["must_change_password"] = True
     users[key] = user
     try:
         saved_user = save_user(key, user, expected_updated_at=read_version)
@@ -838,6 +846,45 @@ async def change_initial_password(req: InitialPasswordChangeRequest, request: Re
     revoke_user_sessions(key)
     clear_login_failures(req.username, client_identity=client_identity)
     return api_ok(message="Initial password changed; sign in with the new password")
+
+
+@router.post(
+    "/auth/change-password",
+    response_model=StatusOkResponse,
+    responses={400: {"model": ApiErrorResponse}, 401: {"model": ApiErrorResponse},
+               409: {"model": ApiErrorResponse}, 429: {"model": ApiErrorResponse}},
+)
+async def change_personal_password(req: PersonalPasswordChangeRequest, request: Request,
+                                   response: Response, actor: dict = Depends(get_actor)):
+    key = actor_id(actor)
+    if not key:
+        return authentication_error("Not authenticated")
+    throttle_key = "password-change:" + key
+    client_identity = login_client_identity(request)
+    retry_after = login_retry_after(throttle_key, client_identity=client_identity)
+    if retry_after:
+        return login_rate_limit_error(retry_after)
+    user = dict(load_users().get(key) or {})
+    if not user.get("active", True) or not user or user.get("must_change_password"):
+        return authentication_error("Not authenticated")
+    if not verify_password(req.current_password, str(user.get("password_hash") or "")):
+        retry_after = record_login_failure(throttle_key, client_identity=client_identity)
+        if retry_after:
+            return login_rate_limit_error(retry_after)
+        return JSONResponse(status_code=400, content=api_error("目前密碼不正確，請重新輸入"))
+    if req.new_password == req.current_password or not valid_password(req.new_password):
+        return JSONResponse(status_code=400, content=api_error("新密碼須與目前密碼不同，至少 8 個字元，且不可使用常見預設密碼"))
+    read_version = str(user.get("updated_at") or "") or None
+    user["password_hash"] = hash_password(req.new_password)
+    user["credential_epoch"] = credential_epoch(user) + 1
+    try:
+        save_user(key, user, expected_updated_at=read_version)
+    except ConcurrentUserUpdateError:
+        return JSONResponse(status_code=409, content=concurrency_error())
+    revoke_user_sessions(key)
+    clear_login_failures(throttle_key, client_identity=client_identity)
+    clear_session_cookie(response)
+    return api_ok(message="密碼已更改，所有裝置已登出，請使用新密碼登入")
 
 
 @router.get("/auth/login-config", response_model=LoginConfigResponse)
@@ -1122,6 +1169,18 @@ def can_view_issue(actor: dict, issue: dict) -> bool:
     return False
 
 
+def can_revise_work_order_knowledge(actor: dict, order: dict) -> bool:
+    """Only the assigned technician may supplement a returned closed record."""
+    return (
+        actor_role(actor) == "maintenance"
+        and bool(actor_id(actor))
+        and order.get("assigned_to") == actor_id(actor)
+        and order.get("status") in {"completed", "verified"}
+        and order.get("kb_review_status") == "needs_revision"
+        and not order.get("deleted_at")
+    )
+
+
 def can_view_work_order(actor: dict, order: dict, linked_issue: Optional[dict] = None) -> bool:
     role = actor_role(actor)
     if role in FULL_ACCESS_ROLES:
@@ -1130,7 +1189,7 @@ def can_view_work_order(actor: dict, order: dict, linked_issue: Optional[dict] =
         return linked_issue is not None and can_view_issue(actor, linked_issue)
     if role == "maintenance":
         if order.get("status") in ("completed", "verified", "cancelled"):
-            return False
+            return can_revise_work_order_knowledge(actor, order)
         assigned_to = str(order.get("assigned_to") or "")
         return not assigned_to or assigned_to == actor_id(actor)
     return False
@@ -1168,6 +1227,8 @@ def can_update_work_order(actor: dict, order: dict, next_status: Optional[str]) 
     if role in FULL_ACCESS_ROLES:
         return True
     if role == "maintenance":
+        if can_revise_work_order_knowledge(actor, order):
+            return next_status is None
         return can_view_work_order(actor, order) and next_status != "verified"
     if role == "operator":
         return next_status in (None, "verified") and can_verify(actor)

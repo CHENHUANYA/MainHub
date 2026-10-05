@@ -5,12 +5,15 @@ import re
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from services.evidence_guard import mock_evidence_notice
+
 
 RESERVED_CITATION_COMMENT = re.compile(r"<!--\s*(?:PAGE|CODE|TITLE)\s*:[\s\S]*?-->", re.IGNORECASE)
 
 
-def strip_reserved_citation_comments(content: str) -> str:
-    return RESERVED_CITATION_COMMENT.sub("", str(content or "")).lstrip("\r\n")
+def strip_reserved_citation_comments(content: str, *, strip_leading_newlines: bool = True) -> str:
+    cleaned = RESERVED_CITATION_COMMENT.sub("", str(content or ""))
+    return cleaned.lstrip("\r\n") if strip_leading_newlines else cleaned
 
 
 @dataclass(frozen=True)
@@ -26,7 +29,6 @@ class CompletionDependencies:
     record_metric: Any
     make_response: Any
     ollama_model: str
-    school_model: str
 
 
 async def complete_non_streaming_chat(
@@ -65,14 +67,11 @@ async def complete_non_streaming_chat(
         provider = "unavailable"
         dependencies.record_error(collection_name, user_query, docs, exc)
 
+    content = mock_evidence_notice(docs) + content
     elapsed_ms = int((time.time() - start_ts) * 1000)
     answer_state = dependencies.classify_answer_state(provider)
     dependencies.record_query(collection_name, user_query, source="api", elapsed_ms=elapsed_ms)
-    model = (
-        dependencies.school_model
-        if provider == "school"
-        else dependencies.ollama_model if provider == "ollama" else ""
-    )
+    model = dependencies.ollama_model if provider == "ollama" else ""
     await dependencies.save_answer(
         answer_id=response_id,
         query=user_query,

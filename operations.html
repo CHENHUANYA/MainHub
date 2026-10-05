@@ -6,7 +6,9 @@
   <title>SINUMERIK 維運管理</title>
   <link rel="stylesheet" href="/static/css/tokens.css?v=1">
   <link rel="stylesheet" href="/static/css/operations.css?v=quality-2">
-  <link rel="stylesheet" href="/static/css/utilities.css?v=csp-1">
+  <link rel="stylesheet" href="/static/css/excel-import.css">
+  <link rel="stylesheet" href="/static/css/utilities.css?v=company-header-1">
+  <link rel="stylesheet" href="/static/css/password-settings.css?v=1">
   <link rel="stylesheet" href="/static/css/accessibility.css?v=1">
 </head>
 <body data-page="operations">
@@ -67,7 +69,7 @@
       <div class="section-label">新增工單</div>
       <div class="wo-form-grid">
         <div class="wo-field"><label class="wo-field-label" for="woAlarm">警報代碼 *</label><input class="wo-input" id="woAlarm" placeholder="例如 3000"></div>
-        <div class="wo-field"><label class="wo-field-label" for="woManual">手冊</label><select class="wo-select" id="woManual"><option value="808d">808D</option><option value="840d">840D</option><option value="840dsl">840D sl</option></select></div>
+        <div class="wo-field"><label class="wo-field-label" for="woManual">手冊</label><select class="wo-select" id="woManual" data-company-collections><option value="">載入知識庫…</option></select></div>
         <div class="wo-field"><label class="wo-field-label" for="woMachine">機台 / 設備</label><input class="wo-input" id="woMachine" placeholder="例如 CNC-01"></div>
         <div class="wo-field"><label class="wo-field-label" for="woPriority">優先等級</label><select class="wo-select" id="woPriority"><option value="medium">中</option><option value="low">低</option><option value="high">高</option><option value="critical">緊急</option></select></div>
         <div class="wo-field"><label class="wo-field-label" for="woAssignee">負責人員</label><input class="wo-input" id="woAssignee" placeholder="負責人員姓名"></div>
@@ -81,9 +83,9 @@
       <div class="section-label">批次匯入 Excel 工單</div>
       <div class="excel-upload-zone" id="excelZone" data-file-trigger="excelFile">
         <div class="eu-icon">📁</div>
-        <div class="eu-text">點擊上傳 .xlsx 檔案，或拖曳至此</div>
+        <div class="eu-text">選擇 .xlsx 預覽，確認後才匯入（最多 1000 筆）</div>
       </div>
-      <input class="u-hidden" type="file" id="excelFile" accept=".xlsx,.xls" aria-label="選擇 Excel 匯入檔案" data-on-change="uploadExcel" data-action-target>
+      <input class="u-hidden" type="file" id="excelFile" accept=".xlsx" aria-label="選擇 Excel 匯入檔案" data-on-change="uploadExcel" data-action-target>
       <div class="excel-result" id="excelResult"></div>
     </div>
 
@@ -98,9 +100,7 @@
   <div class="container">
     <div class="section-label">📚 選擇知識庫集合</div>
     <div class="manual-grid u-mb-24">
-      <button class="manual-btn active" data-kb="808d" data-on-click="selectKB" data-action-target><div class="mb-code">808D</div></button>
-      <button class="manual-btn" data-kb="840d" data-on-click="selectKB" data-action-target><div class="mb-code">840D / 840Di / 810D</div></button>
-      <button class="manual-btn" data-kb="840dsl" data-on-click="selectKB" data-action-target><div class="mb-code">840D sl</div></button>
+      <span data-company-buttons="kb">載入知識庫…</span>
     </div>
 
     <div class="card">
@@ -163,12 +163,7 @@
       <div class="wo-form-grid">
         <div class="wo-field">
           <label class="wo-field-label">預設手冊</label>
-          <select class="wo-select" id="settingsDefaultManual" aria-label="預設手冊">
-            <option value="808d">808D</option>
-            <option value="840d">840D</option>
-            <option value="840dsl">840D sl</option>
-            <option value="furnace_b85t">FURNACE B85T</option>
-          </select>
+          <select class="wo-select" id="settingsDefaultManual" aria-label="預設手冊" data-company-collections><option value="">載入知識庫…</option></select>
         </div>
         <div class="wo-field">
           <label class="wo-field-label">登入有效時數</label>
@@ -205,8 +200,8 @@
     <div class="wo-note u-mt-10">處理結果 / 解決方案（維修紀錄）</div><textarea class="wo-text" id="woEditResolution" aria-label="處理結果或解決方案"></textarea>
     <div class="wo-note u-mt-10">備註</div><textarea class="wo-text" id="woEditNotes" aria-label="工單備註"></textarea>
     <div class="wo-modal-grid u-mt-10">
-      <div><div class="wo-note">接受人員</div><input class="wo-input" id="woEditAcceptedBy" aria-label="接受人員"></div>
-      <div><div class="wo-note">完成人員</div><input class="wo-input" id="woEditCompletedBy" aria-label="完成人員"></div>
+      <div><div class="wo-note">接受人員</div><input class="wo-input" id="woEditAcceptedBy" aria-label="接受人員" readonly></div>
+      <div><div class="wo-note">完成人員</div><input class="wo-input" id="woEditCompletedBy" aria-label="完成人員" readonly></div>
       <div><div class="wo-note">根本原因</div><input class="wo-input" id="woEditRootCause" aria-label="根本原因"></div>
       <div><div class="wo-note">故障分類</div><input class="wo-input" id="woEditFailureCategory" aria-label="故障分類"></div>
       <div><div class="wo-note">LLM 正確率回饋</div><select class="wo-select" id="woEditLlmCorrectness" aria-label="LLM 正確率回饋"><option value="">未評估</option><option value="correct">正確</option><option value="partially_correct">部分正確</option><option value="incorrect">不正確</option><option value="unknown">未知</option></select></div>
@@ -220,11 +215,13 @@
 
 <script src="/static/js/core/api.js"></script>
 <script src="/static/js/core/storage.js"></script>
-<script src="/static/alarm_app.js"></script>
+<script src="/static/alarm_app.js?v=password-1"></script>
 <script src="/static/js/modules/alarm.js"></script>
 <script src="/static/js/modules/chat.js"></script>
 <script src="/static/js/modules/lookup.js"></script>
 <script src="/static/js/modules/operations.js"></script>
+<script src="/static/js/modules/excel-import.js"></script>
 <script src="/static/js/pages/operations.js"></script>
+<script src="/static/js/modules/password-settings.js?v=1"></script>
 </body>
 </html>

@@ -48,7 +48,7 @@ def build_user(
         "team": (request.team or "").strip(),
         "active": True,
         "credential_epoch": 1,
-        "must_change_password": False,
+        "must_change_password": True,
         "password_hash": password_hasher(password),
         "created_at": now,
         "updated_at": now,

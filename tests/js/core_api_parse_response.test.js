@@ -92,6 +92,19 @@ test('HTTP failures use server messages and a status fallback', async () => {
   );
 });
 
+test('first-login errors retain the code without retaining response credentials', async () => {
+  const { api } = loadCoreApi();
+  await assert.rejects(api.parseJsonResponse({
+    ok: false, status: 403,
+    json: async () => ({ message: 'Change password', error_code: 'PASSWORD_CHANGE_REQUIRED', password: 'secret' }),
+  }), error => {
+    assert.equal(error.code, 'PASSWORD_CHANGE_REQUIRED');
+    assert.equal(error.status, 403);
+    assert.equal(error.password, undefined);
+    return true;
+  });
+});
+
 test('apiJson uses same-origin cookies and resolves against the application origin', async () => {
   const calls = [];
   const { api } = loadCoreApi(async (url, options) => {

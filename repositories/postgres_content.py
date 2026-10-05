@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from services.company_config import default_manual
+
 import hashlib
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import case, delete, func, select
@@ -44,7 +46,7 @@ class PostgresAlarmRepository:
         occurred_at = parse_datetime(payload.get("time") or payload.get("date")) or datetime.now(timezone.utc)
         return AlarmEvent(
             event_key=event_key or f"runtime:alarm:{uuid.uuid4().hex}",
-            manual=str(payload.get("manual") or "808d"),
+            manual=str(payload.get("manual") or default_manual()),
             alarm_code=str(payload.get("alarm_code") or ""),
             machine_id=str(payload.get("machine_id") or ""),
             line_id=str(payload.get("line_id") or ""),
@@ -261,6 +263,10 @@ class PostgresSettingsRepository:
 
     def save_all(self, settings: dict[str, Any], updated_by: str, expected_revision: str | None = None) -> str:
         with session_scope() as session:
+            # The first company import has no rows to lock yet. Serialize all
+            # settings writers before checking the revision, including bootstrap.
+            if session.get_bind().dialect.name == "postgresql":
+                session.execute(select(func.pg_advisory_xact_lock(684720260921)))
             user_pk = session.scalar(select(User.id).where(User.user_id == updated_by)) if updated_by else None
             records = session.scalars(select(SystemSetting).with_for_update()).all()
             current_revision = max((iso(record.updated_at) for record in records), default="")
@@ -268,6 +274,13 @@ class PostgresSettingsRepository:
                 raise ConcurrentContentUpdateError("System settings changed since you loaded them. Reload and retry.")
             existing = {record.key: record for record in records}
             updated_at = datetime.now(timezone.utc)
+            # Coarse clocks (and backward clock adjustments) must not reuse a
+            # revision; a second save must invalidate an earlier preview.
+            previous = max((record.updated_at.replace(tzinfo=timezone.utc)
+                            if record.updated_at.tzinfo is None else record.updated_at
+                            for record in records), default=None)
+            if previous is not None and updated_at <= previous:
+                updated_at = previous + timedelta(microseconds=1)
             for key, value in settings.items():
                 if key == "revision":
                     continue

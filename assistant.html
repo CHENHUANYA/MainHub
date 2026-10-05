@@ -3,10 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SINUMERIK 智慧助理</title>
+  <title>設備維護智慧助理</title>
   <link rel="stylesheet" href="/static/css/tokens.css?v=1">
   <link rel="stylesheet" href="/static/css/assistant.css?v=quality-2">
-  <link rel="stylesheet" href="/static/css/utilities.css?v=csp-1">
+  <link rel="stylesheet" href="/static/css/utilities.css?v=company-header-1">
+  <link rel="stylesheet" href="/static/css/password-settings.css?v=1">
   <link rel="stylesheet" href="/static/css/accessibility.css?v=1">
 </head>
 <body data-page="assistant">
@@ -31,8 +32,8 @@
   <div class="logo">
     <div class="logo-icon">⚙️</div>
     <div class="logo-text">
-      <h1>SINUMERIK ALARM SYSTEM</h1>
-      <p>智慧警報查詢平台 · AIDC 漢翔</p>
+      <h1>設備維護智慧助理</h1>
+      <p data-company-name>載入公司設定…</p>
     </div>
   </div>
   <div class="status-pill">
@@ -59,18 +60,7 @@
   <div class="container">
     <div class="section-label">📚 選擇手冊</div>
     <div class="manual-grid">
-      <button class="manual-btn active" data-name="808d" data-on-click="selectManual" data-action-target>
-        <div class="mb-code">808D</div>
-      </button>
-      <button class="manual-btn" data-name="840d" data-on-click="selectManual" data-action-target>
-        <div class="mb-code">840D / 840Di / 810D</div>
-      </button>
-      <button class="manual-btn" data-name="840dsl" data-on-click="selectManual" data-action-target>
-        <div class="mb-code">840D sl</div>
-      </button>
-      <button class="manual-btn" data-name="furnace_b85t" data-on-click="selectManual" data-action-target>
-        <div class="mb-code">FURNACE B85T</div>
-      </button>
+      <span data-company-buttons="lookup">載入知識庫…</span>
     </div>
 
     <div class="section-label">輸入警報代碼或關鍵字</div>
@@ -127,10 +117,7 @@
 <div class="panel" id="panel-chat">
   <div class="container u-max-w-820">
     <div class="chat-manual-bar">
-      <button class="chat-manual-btn active" data-col="808d" data-on-click="selectChatManual" data-action-target>808D</button>
-      <button class="chat-manual-btn" data-col="840d" data-on-click="selectChatManual" data-action-target>840D / 840Di / 810D</button>
-      <button class="chat-manual-btn" data-col="840dsl" data-on-click="selectChatManual" data-action-target>840D sl</button>
-      <button class="chat-manual-btn" data-col="furnace_b85t" data-on-click="selectChatManual" data-action-target>FURNACE B85T</button>
+      <span data-company-buttons="chat">載入知識庫…</span>
       <span class="chat-mode-badge">⚡ RAG + LLM</span>
     </div>
 
@@ -239,10 +226,11 @@
 
 <script src="/static/js/core/api.js"></script>
 <script src="/static/js/core/storage.js"></script>
-<script src="/static/alarm_app.js"></script>
+<script src="/static/alarm_app.js?v=password-1"></script>
 <script src="/static/js/modules/alarm.js"></script>
 <script src="/static/js/modules/chat.js"></script>
 <script src="/static/js/modules/lookup.js"></script>
 <script src="/static/js/pages/assistant.js"></script>
+<script src="/static/js/modules/password-settings.js?v=1"></script>
 </body>
 </html>

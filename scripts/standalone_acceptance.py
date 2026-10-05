@@ -9,6 +9,7 @@ ROOT = SCRIPT_DIR.parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
 from env_utils import load_project_env
+from preflight_check import automation_enabled
 
 
 load_project_env()
@@ -31,6 +32,12 @@ def python_cmd(script: str, *args: str) -> list[str]:
 
 
 def build_steps(args: argparse.Namespace) -> list[Step]:
+    automation = getattr(args, "with_automation", False) or automation_enabled()
+    preflight_args = ["--require-model-cache", "--require-ollama-model"]
+    if automation:
+        preflight_args.append("--with-automation")
+    if getattr(args, "ollama_url", ""):
+        preflight_args.extend(["--ollama-url", args.ollama_url])
     base_args = ["--base-url", args.base_url]
     live_args = [*base_args, "--manual", args.manual, "--alarm-code", args.alarm_code, "--timeout", str(args.timeout)]
     smoke_args = [*live_args]
@@ -38,14 +45,15 @@ def build_steps(args: argparse.Namespace) -> list[Step]:
         smoke_args.extend(["--pdf", args.pdf, "--pdf-max-mb", str(args.pdf_max_mb)])
 
     steps = [
-        Step("preflight", python_cmd("preflight_check.py", "--require-model-cache")),
+        Step("preflight", python_cmd("preflight_check.py", *preflight_args)),
         Step("model-cache", python_cmd("model_cache.py", "check")),
         Step("smoke", python_cmd("smoke_test.py", *smoke_args)),
         Step("regression", python_cmd("regression_checks.py", *live_args)),
         Step("role-console", python_cmd("role_console_smoke.py", *base_args, "--timeout", str(args.timeout))),
-        Step("n8n-workflow", python_cmd("n8n_workflow_check.py")),
         Step("backup:list", python_cmd("data_maintenance.py", "list-backups", "--limit", "5")),
     ]
+    if automation:
+        steps.insert(-1, Step("n8n-workflow", python_cmd("n8n_workflow_check.py")))
     if args.create_backup:
         steps.append(Step("backup:create", python_cmd(
             "data_maintenance.py",
@@ -55,7 +63,10 @@ def build_steps(args: argparse.Namespace) -> list[Step]:
             str(args.retention_days),
         )))
         steps.append(Step("backup:verify-latest", python_cmd("data_maintenance.py", "verify-runtime-backup")))
-        steps.append(Step("backup:health", python_cmd("data_maintenance.py", "backup-health", "--verify")))
+        backup_components = "alarm_db,data,qdrant_data,n8n_data" if automation else "alarm_db,data,qdrant_data"
+        steps.append(Step("backup:health", python_cmd(
+            "data_maintenance.py", "backup-health", "--require-components", backup_components, "--verify",
+        )))
         if args.restore_smoke:
             steps.append(Step("backup:restore-smoke", python_cmd("data_maintenance.py", "restore-smoke", "--cleanup")))
     else:
@@ -95,6 +106,8 @@ def print_summary(results: list[StepResult]) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run Alarm RAG standalone deployment acceptance checks")
     parser.add_argument("--base-url", default="http://localhost:8100")
+    parser.add_argument("--with-automation", action="store_true", help="include optional n8n checks")
+    parser.add_argument("--ollama-url", default="", help="Ollama URL reachable from this check process")
     parser.add_argument("--manual", default="808d")
     parser.add_argument("--alarm-code", default="3000")
     parser.add_argument("--timeout", type=int, default=180)

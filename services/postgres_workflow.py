@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from services.company_config import default_manual
 from datetime import datetime, timezone
 
 from sqlalchemy import select
@@ -38,7 +39,7 @@ def create_issue(
     machine_id: str,
     description: str,
     source: str = "operator",
-    manual: str = "808d",
+    manual: str = "",
     line_id: str = "",
     alarm_code: str = "",
     severity: str = "medium",
@@ -57,7 +58,7 @@ def create_issue(
             issue_no=f"ISS-{now.strftime('%Y%m%d')}-{str(uuid.uuid4())[:6]}",
             alarm_event_id=alarm_event_id,
             source=source or "operator",
-            manual=manual or "808d",
+            manual=manual or default_manual(),
             machine_id=machine_id,
             line_id=line_id,
             alarm_code=alarm_code,
@@ -124,7 +125,7 @@ def _new_order(session, issue: Issue, *, alarm_code: str, manual: str, machine_i
         work_order_no=str(uuid.uuid4())[:8],
         issue_id=issue.id,
         alarm_code=alarm_code,
-        manual=manual or "808d",
+        manual=manual or default_manual(),
         machine_id=machine_id,
         status=status,
         priority=priority,

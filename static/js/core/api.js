@@ -109,7 +109,13 @@
         clearAuth();
         requireAuth();
       }
-      throw new Error(data.message || `Server error: ${response.status}`);
+        const validation = Array.isArray(data.detail)
+          ? data.detail.map(item => `${(item.loc || []).join('.')}: ${item.msg || ''}`).join('\n')
+          : '';
+        const error = new Error(data.message || validation || `Server error: ${response.status}`);
+        error.code = data.error_code;
+        error.status = response.status;
+        throw error;
     }
     if (data?.status === 'error') {
       if (data.message === 'Not authenticated') {

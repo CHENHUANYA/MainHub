@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from services.company_config import default_manual
+
 import hashlib
 import json
 import uuid
@@ -127,6 +129,8 @@ def order_dict(
 ) -> dict:
     return {
         "id": order.work_order_no,
+        "import_key": order.import_key,
+        "import_metadata": order.import_metadata,
         "issue_id": issue_no,
         "alarm_code": order.alarm_code,
         "manual": order.manual,
@@ -175,7 +179,6 @@ def add_missing_audits(session, entity_type: str, entity_id, business_key: str, 
         select(AuditEvent.request_id).where(
             AuditEvent.entity_type == entity_type,
             AuditEvent.entity_id == entity_id,
-            AuditEvent.request_id.like("legacy:%"),
         )
     ).all())
     for entry in entries:
@@ -360,7 +363,7 @@ class PostgresIssueRepository:
                 expected = int(payload.get("version") or issue.version)
                 updates = {
                     "source": str(payload.get("source") or "operator"),
-                    "manual": str(payload.get("manual") or "808d"),
+                    "manual": str(payload.get("manual") or default_manual()),
                     "machine_id": str(payload.get("machine_id") or ""),
                     "line_id": str(payload.get("line_id") or ""),
                     "alarm_code": str(payload.get("alarm_code") or ""),
@@ -473,10 +476,18 @@ class PostgresWorkOrderRepository:
                 if "*" not in line_scope:
                     conditions.append(Issue.line_id.in_(line_scope) if line_scope else false())
             elif role == "maintenance":
-                conditions.extend([
-                    WorkOrder.status.not_in(("completed", "verified", "cancelled")),
-                    or_(WorkOrder.assigned_to_ref == "", WorkOrder.assigned_to_ref == user_id),
-                ])
+                conditions.append(or_(
+                    and_(
+                        WorkOrder.status.not_in(("completed", "verified", "cancelled")),
+                        or_(WorkOrder.assigned_to_ref == "", WorkOrder.assigned_to_ref == user_id),
+                    ),
+                    and_(
+                        WorkOrder.status.in_(("completed", "verified")),
+                        WorkOrder.kb_review_status == "needs_revision",
+                        WorkOrder.assigned_to_ref == user_id,
+                        bool(user_id),
+                    ),
+                ))
             else:
                 conditions.append(false())
         if status:
@@ -577,8 +588,10 @@ class PostgresWorkOrderRepository:
                 expected = int(payload.get("version") or order.version)
                 updates = {
                     "issue_id": issue_ids.get(str(payload.get("issue_id") or "")),
+                    "import_key": order.import_key or payload.get("import_key") or None,
+                    "import_metadata": order.import_metadata or payload.get("import_metadata") or None,
                     "alarm_code": str(payload.get("alarm_code") or "SYMPTOM"),
-                    "manual": str(payload.get("manual") or "808d"),
+                    "manual": str(payload.get("manual") or default_manual()),
                     "machine_id": str(payload.get("machine_id") or ""),
                     "status": str(payload.get("status") or "pending"),
                     "priority": str(payload.get("priority") or "medium"),

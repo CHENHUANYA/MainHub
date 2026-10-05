@@ -243,7 +243,7 @@ def check_answer_snapshot_provider(client: RuntimeClient, answer_id: str) -> tup
     answer = data.get("answer", {}) if isinstance(data, dict) else {}
     provider = str(answer.get("provider") or "") if isinstance(answer, dict) else ""
     state = str(answer.get("answer_state") or "") if isinstance(answer, dict) else ""
-    accepted = {"retrieval", "ollama", "school"}
+    accepted = {"retrieval", "ollama"}
     status = "PASS" if code == 200 and provider in accepted and state in {"complete", "fallback"} else "FAIL"
     return Check(
         "rag:answer-provider",
@@ -430,37 +430,6 @@ def check_stream_chat(client: RuntimeClient, manual: str, prompt: str, expected_
     return check
 
 
-def check_school_api_direct(timeout: int) -> Check:
-    try:
-        from routes import chat_lookup_routes
-
-        import asyncio
-        import httpx
-    except Exception as exc:
-        return Check("llm:school-api", "FAIL", f"import failed: {exc}")
-
-    if not chat_lookup_routes.SCHOOL_API_BASE_URL or not chat_lookup_routes.SCHOOL_API_KEY:
-        return Check("llm:school-api", "SKIP", "SCHOOL_API_BASE_URL or SCHOOL_API_KEY is not configured")
-
-    async def call() -> str:
-        return await chat_lookup_routes.call_school_api(
-            [{"role": "user", "content": "Reply with exactly: ok"}],
-            temperature=0.0,
-            max_tokens=8,
-        )
-
-    try:
-        content = asyncio.run(call())
-    except httpx.HTTPStatusError as exc:
-        status_code = exc.response.status_code if exc.response is not None else "-"
-        status = "WARN" if str(status_code).startswith("4") else "FAIL"
-        return Check("llm:school-api", status, f"HTTP {status_code}")
-    except Exception as exc:
-        return Check("llm:school-api", "FAIL", type(exc).__name__)
-
-    return Check("llm:school-api", "PASS", f"len={len(content)}, preview={content[:20]!r}")
-
-
 def check_not_ready_message(client: RuntimeClient) -> Check:
     code, data = client.request_json("/v1/runtime_missing_collection/chat/completions", "POST", chat_payload("test missing collection"))
     content = ""
@@ -580,7 +549,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout", type=int, default=90)
     parser.add_argument("--require-vector-coverage", action="store_true")
     parser.add_argument("--require-reranker", action="store_true", help="fail unless reranker inference succeeds during this gate")
-    parser.add_argument("--check-school-api", action="store_true", help="directly call the configured School API provider")
     parser.add_argument("--gold-dataset", type=Path, default=DEFAULT_GOLD_DATASET)
     parser.add_argument("--gold-split-manifest", type=Path, default=DEFAULT_GOLD_SPLIT)
     parser.add_argument("--gold-scope", choices=sorted(VALID_SCOPES), default="development")
@@ -672,12 +640,10 @@ def main(argv: list[str] | None = None) -> int:
         checks.append(
             Check(
                 "llm:last-source",
-                "PASS" if last_source == answer_provider and answer_provider in {"ollama", "school"} else "FAIL",
+                "PASS" if last_source == answer_provider and answer_provider == "ollama" else "FAIL",
                 f"health={last_source}, snapshot={answer_provider or '-'}",
             )
         )
-    if args.check_school_api:
-        checks.append(check_school_api_direct(args.timeout))
     checks.append(
         check_stream_chat(
             client,

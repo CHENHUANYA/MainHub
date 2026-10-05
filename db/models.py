@@ -36,6 +36,16 @@ def created_at_column() -> Mapped[datetime]:
     return mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
+class ImportBatch(Base):
+    __tablename__ = "import_batches"
+
+    batch_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = created_at_column()
+    payload: Mapped[dict] = mapped_column(JSON_TYPE, nullable=False)
+    __table_args__ = (Index('ix_import_batches_created_at', 'created_at', 'batch_id'),)
+
+
 class User(Base):
     __tablename__ = "users"
     __table_args__ = (CheckConstraint("role IN ('operator','maintenance','supervisor','admin')", name="valid_role"),)
@@ -99,7 +109,7 @@ class AlarmEvent(Base):
 
     id: Mapped[uuid.UUID] = uuid_pk()
     event_key: Mapped[str | None] = mapped_column(String(255), unique=True)
-    manual: Mapped[str] = mapped_column(String(64), nullable=False, server_default="808d")
+    manual: Mapped[str] = mapped_column(String(64), nullable=False, server_default="")
     alarm_code: Mapped[str] = mapped_column(String(128), nullable=False)
     machine_id: Mapped[str] = mapped_column(String(255), nullable=False, server_default="")
     line_id: Mapped[str] = mapped_column(String(255), nullable=False, server_default="")
@@ -126,7 +136,7 @@ class Issue(Base):
     issue_no: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
     alarm_event_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("alarm_events.id", ondelete="SET NULL"))
     source: Mapped[str] = mapped_column(String(128), nullable=False, server_default="operator")
-    manual: Mapped[str] = mapped_column(String(64), nullable=False, server_default="808d")
+    manual: Mapped[str] = mapped_column(String(64), nullable=False, server_default="")
     machine_id: Mapped[str] = mapped_column(String(255), nullable=False)
     line_id: Mapped[str] = mapped_column(String(255), nullable=False, server_default="")
     alarm_code: Mapped[str] = mapped_column(String(128), nullable=False, server_default="")
@@ -174,9 +184,11 @@ class WorkOrder(Base):
 
     id: Mapped[uuid.UUID] = uuid_pk()
     work_order_no: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    import_key: Mapped[str | None] = mapped_column(String(64), unique=True)
+    import_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON_TYPE)
     issue_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("issues.id", ondelete="SET NULL"), unique=True)
     alarm_code: Mapped[str] = mapped_column(String(128), nullable=False)
-    manual: Mapped[str] = mapped_column(String(64), nullable=False, server_default="808d")
+    manual: Mapped[str] = mapped_column(String(64), nullable=False, server_default="")
     machine_id: Mapped[str] = mapped_column(String(255), nullable=False, server_default="")
     status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="pending")
     priority: Mapped[str] = mapped_column(String(32), nullable=False, server_default="medium")

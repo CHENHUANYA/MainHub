@@ -38,6 +38,10 @@ function currentMaintenanceUser() {
   return maintenanceApp()?.currentUserId?.() || 'maintenance01';
 }
 
+function isMaintenanceKnowledgeRevision(order) {
+  return Boolean(order && ['completed', 'verified'].includes(order.status) && order.kb_review_status === 'needs_revision');
+}
+
 function normalizeFilterText(value) {
   return String(value || '').trim().toLowerCase();
 }
@@ -102,7 +106,7 @@ function filterMaintenanceIssues(issues) {
 function filterWorkOrders(orders) {
   const filters = currentWorkFilters();
   return (orders || []).filter((order) => {
-    if (filters.view === 'active' && ['verified', 'cancelled'].includes(order.status)) return false;
+    if (filters.view === 'active' && ['verified', 'cancelled'].includes(order.status) && !isMaintenanceKnowledgeRevision(order)) return false;
     if (filters.view === 'verified' && order.status !== 'verified') return false;
     if (filters.priority && order.priority !== filters.priority) return false;
     if (filters.view === 'unassigned' && (order.assigned_to || ['completed', 'verified', 'cancelled'].includes(order.status))) return false;
@@ -231,10 +235,14 @@ function renderWorkOrders(orders) {
     return;
   }
 
-  const columns = currentMaintenanceColumns();
+  const revisionOrders = orders.filter(isMaintenanceKnowledgeRevision);
+  const columns = revisionOrders.length
+    ? [{ key: 'knowledge_revision', title: '待補充知識' }, ...currentMaintenanceColumns()]
+    : currentMaintenanceColumns();
   board.dataset.columnCount = String(columns.length);
   board.innerHTML = columns.map((column) => {
-    const items = orders.filter((order) => order.status === column.key);
+    const items = column.key === 'knowledge_revision' ? revisionOrders
+      : orders.filter((order) => order.status === column.key && !isMaintenanceKnowledgeRevision(order));
     const cards = items.length ? items.map(workOrderCard).join('') : '<div class="maintenance-column-empty">無工單</div>';
     return `<div class="wo-col">
       <div class="wo-col-head">
@@ -339,7 +347,6 @@ async function patchMaintenanceWorkOrder(orderId, payload, fallbackMessage) {
   const order = getMaintenanceOrder(orderId);
   const body = {
     ...payload,
-    updated_by: payload.updated_by || currentMaintenanceUser(),
     ...(payload.version !== undefined || order?.version === undefined ? {} : { version: order.version }),
   };
 
@@ -362,7 +369,6 @@ async function acceptWorkOrder(orderId) {
   await patchMaintenanceWorkOrder(orderId, {
     status: 'in_progress',
     assigned_to: currentMaintenanceUser(),
-    accepted_by: currentMaintenanceUser(),
   }, '接手工單失敗');
 }
 
@@ -370,7 +376,6 @@ async function startWorkOrder(orderId) {
   await patchMaintenanceWorkOrder(orderId, {
     status: 'in_progress',
     assigned_to: currentMaintenanceUser(),
-    accepted_by: currentMaintenanceUser(),
   }, '開始工單失敗');
 }
 
@@ -468,25 +473,25 @@ function renderMaintenanceIssueContext(order) {
   if (!issue) {
     box.innerHTML = `<div class="maintenance-context-title">問題脈絡</div>
       <div class="maintenance-context-grid">
-        <div><span>問題</span><b>${app.esc(order.issue_id || 'N/A')}</b></div>
-        <div><span>來源</span><b>${app.esc(order.source || 'manual')}</b></div>
-        <div><span>機台</span><b>${app.esc(order.machine_id || 'N/A')}</b></div>
-        <div><span>Alarm</span><b>${app.esc(order.alarm_code || 'SYMPTOM')}</b></div>
+        <div><span>來源</span><b>${app.esc(window.AlarmAudit.sourceLabel(order.source || 'manual'))}</b></div>
+        <div><span>警報代碼</span><b>${app.esc(order.alarm_code || '症狀描述')}</b></div>
       </div>`;
     return;
   }
 
   const notes = Array.isArray(issue.operator_notes) ? issue.operator_notes : [];
   const latestNote = notes.length ? notes[notes.length - 1].note : '';
-  box.innerHTML = `<div class="maintenance-context-title">Operator 問題脈絡</div>
+  const originalDescription = issue.original_description || issue.description || '';
+  const originalContext = originalDescription && originalDescription !== (order.description || '')
+    ? `<div class="maintenance-context-text">原始通報：${app.esc(originalDescription)}</div>` : '';
+  box.innerHTML = `<div class="maintenance-context-title">問題脈絡</div>
     <div class="maintenance-context-grid">
-      <div><span>問題</span><b>${app.esc(issue.issue_id || 'N/A')}</b></div>
-      <div><span>來源</span><b>${app.esc(issue.source || 'operator')}</b></div>
+      <div><span>來源</span><b>${app.esc(window.AlarmAudit.sourceLabel(issue.source || 'operator'))}</b></div>
       <div><span>產線</span><b>${app.esc(issue.line_id || 'N/A')}</b></div>
       <div><span>狀態</span><b>${app.esc(issueStatusLabel(issue.status))}</b></div>
     </div>
-    <div class="maintenance-context-text">${app.esc(issue.original_description || issue.description || '')}</div>
-    ${latestNote ? `<div class="maintenance-context-note">${app.esc(latestNote)}</div>` : ''}`;
+    ${originalContext}
+    ${latestNote ? `<div class="maintenance-context-note">${app.esc(window.AlarmAudit.displayNote(latestNote))}</div>` : ''}`;
 }
 
 function renderMaintenanceTimeline(order) {
@@ -501,17 +506,17 @@ function renderMaintenanceTimeline(order) {
     return;
   }
 
-  box.innerHTML = `<div class="maintenance-context-title">Audit timeline</div>
+  box.innerHTML = `<div class="maintenance-context-title">處理時間線</div>
     ${events.map((event) => {
       const statusText = event.from_status || event.to_status
-        ? `${event.from_status || '-'} -> ${event.to_status || '-'}`
+        ? `${window.AlarmAudit.statusLabel(event.from_status)} → ${window.AlarmAudit.statusLabel(event.to_status)}`
         : '';
       const changes = window.AlarmAudit?.renderChanges(app, event) || '';
       return `<div class="audit-event">
         <div class="audit-dot"></div>
         <div class="audit-body">
-          <div class="audit-title">${app.esc(event.audit_source || 'audit')} · ${app.esc(event.action || 'updated')} ${statusText ? `<span>${app.esc(statusText)}</span>` : ''}</div>
-          <div class="audit-meta">${app.esc(event.user_id || 'system')} · ${app.esc(formatMaintenanceTime(event.created_at))}</div>
+          <div class="audit-title">${app.esc(window.AlarmAudit.sourceLabel(event.audit_source))} · ${app.esc(window.AlarmAudit.actionLabel(event.action, event.audit_source))} ${statusText ? `<span>${app.esc(statusText)}</span>` : ''}</div>
+          <div class="audit-meta">${app.esc(event.user_id || '系統')} · ${app.esc(formatMaintenanceTime(event.created_at))}</div>
           ${changes}
         </div>
       </div>`;
@@ -535,9 +540,18 @@ function openMaintenanceModal(orderId) {
   const order = findCurrentOrder(orderId);
   if (!app || !order) return;
 
+  const revision = isMaintenanceKnowledgeRevision(order);
+  ['mtEditStatus', 'mtEditPriority', 'mtEditAssignee', 'mtEditMachine', 'mtEditDesc',
+    'mtEditFailureCategory', 'mtEditLlmCorrectness', 'mtEditLlmCoverage', 'mtEditLlmMissingInfo'].forEach(id => {
+    app.$(id).disabled = revision;
+  });
+  app.$('mtSaveOrder').textContent = revision ? '補充並重新送審' : '儲存';
+  app.$('mtDeleteOrder').classList.toggle('u-hidden', revision);
+  app.$('mtSaveResult').textContent = '';
+
   app.setState('maintenanceCurrentOrderId', orderId);
   app.$('mtModalTitle').textContent = `工單 #${order.id}`;
-  app.$('mtModalId').textContent = `問題 ${order.issue_id || 'N/A'} | ${String(order.manual || '808d').toUpperCase()}`;
+  app.$('mtModalId').textContent = `問題 ${order.issue_id || 'N/A'} | ${String(order.manual || window.AlarmApp.getState('defaultManual')).toUpperCase()}`;
   app.$('mtEditStatus').value = order.status || 'pending';
   app.$('mtEditPriority').value = order.priority || 'medium';
   app.$('mtEditAssignee').value = order.assigned_to || currentMaintenanceUser();
@@ -559,7 +573,8 @@ function openMaintenanceModal(orderId) {
   if (reviewBox) {
     reviewBox.classList.toggle('u-hidden', reviewStatus === 'not_ready');
     reviewBox.textContent = `${MAINTENANCE_KB_REVIEW_LABELS[reviewStatus] || reviewStatus}` +
-      `${order.kb_review_note ? `：${order.kb_review_note}` : ''}`;
+      `${order.kb_review_note ? `：${order.kb_review_note}` : ''}` +
+      (revision ? '（補充根本原因、實際維修動作、處理結果或備註後，按「補充並重新送審」。）' : '');
   }
   renderMaintenanceIssueContext(order);
   renderMaintenanceTimeline(order);
@@ -569,7 +584,7 @@ function openMaintenanceModal(orderId) {
 
 function closeMaintenanceModal() {
   const app = maintenanceApp();
-  if (!app) return;
+  if (!app || app.getState('maintenanceSaving')) return;
   app.$('maintenanceModal').classList.remove('show');
   app.setState('maintenanceCurrentOrderId', null);
 }
@@ -577,10 +592,13 @@ function closeMaintenanceModal() {
 async function saveMaintenanceWorkOrder() {
   const app = maintenanceApp();
   const orderId = app?.getState('maintenanceCurrentOrderId');
-  if (!app || !orderId) return;
+  if (!app || !orderId || app.getState('maintenanceSaving')) return;
   const order = getMaintenanceOrder(orderId);
+  const revision = isMaintenanceKnowledgeRevision(order);
+  const errorBox = app.$('mtSaveResult');
+  errorBox.textContent = '';
 
-  const payload = {
+  let payload = {
     status: app.$('mtEditStatus').value,
     priority: app.$('mtEditPriority').value,
     assigned_to: app.$('mtEditAssignee').value.trim(),
@@ -588,8 +606,6 @@ async function saveMaintenanceWorkOrder() {
     description: app.$('mtEditDesc').value.trim(),
     resolution: app.$('mtEditResolution').value.trim(),
     notes: app.$('mtEditNotes').value.trim(),
-    accepted_by: app.$('mtEditAcceptedBy').value.trim(),
-    completed_by: app.$('mtEditCompletedBy').value.trim(),
     root_cause: app.$('mtEditRootCause').value.trim(),
     repair_action: app.$('mtEditRepairAction').value.trim(),
     failure_category: app.$('mtEditFailureCategory').value.trim(),
@@ -598,21 +614,31 @@ async function saveMaintenanceWorkOrder() {
     llm_missing_info: app.$('mtEditLlmMissingInfo').value.trim(),
     llm_expected_fix: app.$('mtEditResolution').value.trim(),
     llm_answer_used: Boolean(app.$('mtEditLlmCorrectness').value || app.$('mtEditLlmCoverage').value),
-    updated_by: currentMaintenanceUser(),
     ...(order?.version === undefined ? {} : { version: order.version }),
   };
 
-  if (payload.status === 'in_progress' && !payload.accepted_by) payload.accepted_by = currentMaintenanceUser();
-  if (payload.status === 'completed' && !payload.completed_by) payload.completed_by = currentMaintenanceUser();
+  if (revision) {
+    payload = Object.fromEntries(['root_cause', 'repair_action', 'resolution', 'notes', 'version']
+      .filter(key => payload[key] !== undefined).map(key => [key, payload[key]]));
+    if (!payload.root_cause || !payload.repair_action || !payload.resolution) {
+      errorBox.textContent = '重新送審前，請填寫根本原因、實際維修動作與處理結果。';
+      return;
+    }
+  }
+
   if (payload.status === 'completed' && (!payload.root_cause || !payload.repair_action)) {
-    window.alert('完成工單前，請填寫根本原因與實際維修動作。');
+    errorBox.textContent = '完成工單前，請填寫根本原因與實際維修動作。';
     (payload.root_cause ? app.$('mtEditRepairAction') : app.$('mtEditRootCause')).focus();
     return;
   }
   if (payload.status === 'verified') {
-    window.alert('維修人員不能直接驗證工單，請由 Operator 或 Supervisor 確認完成。');
+    errorBox.textContent = '維修人員不能直接驗證工單，請由 Operator 或 Supervisor 確認完成。';
     return;
   }
+  app.setState('maintenanceSaving', true);
+  app.$('mtWorkResult')?.classList.add('u-hidden');
+  app.$('mtSaveOrder').disabled = true;
+  app.$('mtDeleteOrder').disabled = true;
   try {
     const data = await app.apiJson(`/work-orders/${encodeURIComponent(orderId)}`, {
       method: 'PATCH',
@@ -620,10 +646,26 @@ async function saveMaintenanceWorkOrder() {
       body: JSON.stringify(payload),
     });
     if (data.status !== 'ok') throw new Error(data.message || '儲存工單失敗');
+    app.setState('maintenanceSaving', false);
     closeMaintenanceModal();
+    const notice = app.$('mtWorkResult');
+    if (notice) {
+      notice.textContent = revision
+        ? `工單 #${orderId} 已補充並重新送審，等待管理員審核；已移出待補充清單。`
+        : `工單 #${orderId} 已儲存。`;
+      notice.classList.remove('u-hidden');
+    }
     await loadMaintenanceData();
+    if (notice) {
+      notice.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      notice.focus({ preventScroll: true });
+    }
   } catch (error) {
-    window.alert(app.formatError(error, '儲存工單失敗'));
+    errorBox.textContent = app.formatError(error, '儲存工單失敗');
+  } finally {
+    app.setState('maintenanceSaving', false);
+    app.$('mtSaveOrder').disabled = false;
+    app.$('mtDeleteOrder').disabled = false;
   }
 }
 
@@ -642,7 +684,8 @@ async function deleteMaintenanceWorkOrder() {
   }
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  if (!await window.AlarmApp?.loadCompanyConfig()) return;
   const app = maintenanceApp();
   if (!app) return;
 

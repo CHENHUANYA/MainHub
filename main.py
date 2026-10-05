@@ -41,6 +41,7 @@ from observability import RequestLoggingMiddleware, configure_logging
 from routes.alarm_routes import router as alarm_router
 from routes.chat_lookup_routes import router as chat_lookup_router
 from routes.ingest_routes import router as ingest_router
+from routes.import_routes import router as import_router
 from routes.settings_routes import router as settings_router
 from routes.static_reference_routes import router as static_reference_router
 from routes.stats_routes import router as stats_router
@@ -78,6 +79,7 @@ app.add_middleware(RequestBodyLimitMiddleware)
 load_all_engines()
 
 app.include_router(auth_router)
+app.include_router(import_router)
 app.include_router(work_order_router)
 app.include_router(issue_router)
 app.include_router(chat_lookup_router)

@@ -141,3 +141,24 @@
 .u-pct-90 { width: 90%; }
 .u-pct-95 { width: 95%; }
 .u-pct-100 { width: 100%; }
+
+/* Company identity belongs with the page title, not in the content gutter. */
+.company-header { gap: 16px; }
+.company-header .logo { min-width: 0; }
+.company-header .logo-text { min-width: 0; }
+.company-header .logo-text .company-name {
+  margin: 0 0 4px;
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+  letter-spacing: .02em;
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+.company-header .logo-icon { flex-shrink: 0; }
+@media (max-width: 640px) {
+  .company-header { flex-wrap: wrap; gap: 10px; }
+  .company-header .logo { flex: 1 1 100%; }
+  .company-header .status-pill { margin-left: auto; }
+}

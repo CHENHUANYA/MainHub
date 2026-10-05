@@ -5,10 +5,11 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from repositories.runtime import postgres_store_enabled
+from services.company_config import company_from_settings, legacy_config
 
 
 DEFAULT_SETTINGS: dict[str, Any] = {
-    "default_manual": "808d",
+    "default_manual": legacy_config().default_collection,
     "session_hours": 12,
     # Reopening a closed issue is a privileged workflow transition.  Missing or
     # unreadable configuration must not silently grant it.
@@ -53,7 +54,7 @@ def load_effective_settings(
         payload = postgres_reader.load_all()
         if not isinstance(payload, dict):
             raise RuntimeError("Invalid PostgreSQL settings payload")
-        return {**DEFAULT_SETTINGS, **payload}
+        return _merge_settings(payload)
 
     try:
         with Path(settings_path).open("r", encoding="utf-8") as file:
@@ -62,4 +63,16 @@ def load_effective_settings(
         return dict(DEFAULT_SETTINGS)
     if not isinstance(payload, dict):
         return dict(DEFAULT_SETTINGS)
-    return {**DEFAULT_SETTINGS, **payload}
+    return _merge_settings(payload)
+
+
+def _merge_settings(payload: dict) -> dict:
+    settings = {**DEFAULT_SETTINGS, **payload}
+    if payload.get("company_config") is not None:
+        company = company_from_settings(payload)
+        settings["default_manual"] = payload.get("default_manual") or company.default_collection
+        if settings["default_manual"] not in {item.id for item in company.collections}:
+            raise ValueError("default_manual is not in company collections")
+        if "allow_operator_reopen" not in payload:
+            settings["allow_operator_reopen"] = company.workflow.allow_operator_reopen
+    return settings

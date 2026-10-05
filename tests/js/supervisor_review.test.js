@@ -40,7 +40,12 @@ function loadSupervisorPage({ orders = [], issues = [], mergedEvents = [] } = {}
     svReviewSummary: { innerHTML: '' },
     svReviewRecords: { innerHTML: '' },
     svReviewTimeline: { innerHTML: '' },
-    svReviewActions: { innerHTML: '' },
+    svReviewActions: { innerHTML: '', classList: classList() },
+    svReworkForm: { classList: classList(), scrollIntoView() {} },
+    svReworkNote: { value: '', focus() {} },
+    svReworkError: { textContent: '' },
+    svReworkSubmit: { disabled: false, textContent: '' },
+    svReworkCancel: { disabled: false },
   };
   const trigger = { focused: false, focus() { this.focused = true; } };
   const app = {
@@ -59,6 +64,7 @@ function loadSupervisorPage({ orders = [], issues = [], mergedEvents = [] } = {}
   const window = {
     AlarmApp: app,
     AlarmAudit: { mergeEvents: () => mergedEvents },
+    prompt: () => { throw new Error('Native dialogs must not be used'); },
     addEventListener: () => {},
     location: { hash: '' },
     history: { replaceState: () => {} },
@@ -70,6 +76,8 @@ function loadSupervisorPage({ orders = [], issues = [], mergedEvents = [] } = {}
     window,
   };
   context.globalThis = context;
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../static/js/modules/audit.js'), 'utf8'), context);
+  window.AlarmAudit.mergeEvents = () => mergedEvents;
   const source = fs.readFileSync(path.join(__dirname, '../../static/js/pages/supervisor.js'), 'utf8');
   vm.runInNewContext(source, context, { filename: 'supervisor.js' });
   return { app, closeButton, context, elements, modal, scroll, state, trigger, window };
@@ -175,6 +183,19 @@ test('supervisor timeline groups duplicate stored copies without changing the so
   assert.equal(JSON.stringify(mergedEvents), before);
 });
 
+test('supervisor review shows the status transition only in the event heading', () => {
+  const { app, context } = loadSupervisorPage();
+  const changes = [{ field: 'status', from: 'in_progress', to: 'completed' },
+    { field: 'completed_by', from: '', to: 'maintenance01' }];
+  const html = context.renderSupervisorReviewChanges(app, {
+    from_status: 'in_progress', to_status: 'completed', changes,
+  });
+  assert.equal((html.match(/<b>/g) || []).length, 1);
+  assert.match(html, /maintenance01/);
+  const withoutHeading = context.renderSupervisorReviewChanges(app, { changes });
+  assert.equal((withoutHeading.match(/<b>/g) || []).length, 2);
+});
+
 test('supervisor timeline preserves distinct sources, times, actors, statuses, and changes', () => {
   const event = {
     action: 'updated', audit_source: 'work order', user_id: 'maintenance01',
@@ -195,4 +216,62 @@ test('supervisor timeline preserves distinct sources, times, actors, statuses, a
   const { context } = loadSupervisorPage();
   assert.equal(context.groupSupervisorReviewEvents(events).length, events.length);
   assert.equal(context.groupSupervisorReviewEvents([{ action: 'created' }, { action: 'created' }]).length, 2);
+});
+
+test('rework opens an inline form and cancel/blank input never send a request', async () => {
+  const { app, context, elements, state } = loadSupervisorPage({ issues: [{ issue_id: 'ISS-1', version: 4 }] });
+  app.apiJson = async () => assert.fail('No request expected');
+  context.requestSupervisorRework('ISS-1');
+  assert.equal(elements.svReworkForm.classList.contains('u-hidden'), false);
+  assert.equal(state.get('supervisorReworkVersion'), 4);
+  elements.svReworkNote.value = '  ';
+  await context.submitSupervisorRework();
+  assert.ok(elements.svReworkError.textContent);
+  context.cancelSupervisorRework();
+  assert.equal(elements.svReworkForm.classList.contains('u-hidden'), true);
+  assert.equal(state.get('supervisorReworkIssueId'), null);
+});
+
+test('rework sends the captured version once and preserves input on failure', async () => {
+  const { app, context, elements, state } = loadSupervisorPage({ issues: [{ issue_id: 'ISS-1', version: 4 }] });
+  let reject;
+  const calls = [];
+  app.formatError = () => 'Version conflict';
+  app.apiJson = (url, options) => {
+    calls.push({ url, body: JSON.parse(options.body) });
+    return new Promise((_, fail) => { reject = fail; });
+  };
+  context.requestSupervisorRework('ISS-1');
+  elements.svReworkNote.value = '  Correct the root cause  ';
+  state.set('supervisorIssues', [{ issue_id: 'ISS-1', version: 5 }]);
+  const request = context.submitSupervisorRework();
+  await context.submitSupervisorRework();
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0], { url: '/issues/ISS-1', body: {
+    status: 'open', operator_note: '[Supervisor rework] Correct the root cause', version: 4,
+  } });
+  assert.equal(elements.svReworkSubmit.disabled, true);
+  context.cancelSupervisorRework();
+  assert.equal(state.get('supervisorReworkIssueId'), 'ISS-1');
+  reject(new Error('conflict'));
+  await request;
+  assert.equal(elements.svReworkError.textContent, 'Version conflict');
+  assert.equal(elements.svReworkNote.value, '  Correct the root cause  ');
+  assert.equal(elements.svReworkSubmit.disabled, false);
+});
+
+test('successful rework closes the dialog and refreshes the queue', async () => {
+  const { app, context, elements, state, modal } = loadSupervisorPage({ issues: [{ issue_id: 'ISS-1', version: 4 }] });
+  let refreshed = 0;
+  context.loadSupervisorConsole = async () => { refreshed += 1; };
+  context.setSupervisorResult = () => {};
+  app.apiJson = async () => ({ status: 'ok' });
+  modal.classList.add('show');
+  context.requestSupervisorRework('ISS-1');
+  elements.svReworkNote.value = 'Correct the cause';
+  await context.submitSupervisorRework();
+  assert.equal(refreshed, 1);
+  assert.equal(modal.classList.contains('show'), false);
+  assert.equal(state.get('supervisorReworkIssueId'), null);
+  assert.equal(elements.svReworkNote.value, '');
 });

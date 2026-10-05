@@ -6,7 +6,8 @@
   <title>產線問題看板</title>
   <link rel="stylesheet" href="/static/css/tokens.css?v=1">
   <link rel="stylesheet" href="/static/css/operator.css?v=quality-2">
-  <link rel="stylesheet" href="/static/css/utilities.css?v=csp-1">
+  <link rel="stylesheet" href="/static/css/utilities.css?v=company-header-1">
+  <link rel="stylesheet" href="/static/css/password-settings.css?v=1">
   <link rel="stylesheet" href="/static/css/accessibility.css?v=1">
 </head>
 <body data-page="operator">
@@ -40,17 +41,17 @@
       <div class="wo-stat"><div class="label">未處理問題</div><div class="val" id="issueOpenCount">--</div><div class="sub">待處理與處理中</div></div>
       <div class="wo-stat"><div class="label">今日新增</div><div class="val" id="issueTodayCount">--</div><div class="sub">人工回報與機器事件</div></div>
       <div class="wo-stat"><div class="label">已通知維修</div><div class="val" id="issueWorkOrderCount">--</div><div class="sub">已建立維修工單</div></div>
-      <div class="wo-stat"><div class="label">目前產線</div><div class="val" id="issueLineLabel">LINE-A</div><div class="sub">未來由帳號權限帶入</div></div>
+      <div class="wo-stat"><div class="label">目前產線</div><div class="val" id="issueLineLabel">—</div><div class="sub">依帳號可用產線顯示</div></div>
     </div>
 
     <div class="card">
       <div class="section-label">問題回報</div>
       <div class="wo-form-grid">
         <div class="wo-field"><label class="wo-field-label" for="issueUser">使用者</label><input class="wo-input" id="issueUser" value="operator01"></div>
-        <div class="wo-field"><label class="wo-field-label" for="issueLine">產線</label><input class="wo-input" id="issueLine" value="LINE-A"></div>
+        <div class="wo-field"><label class="wo-field-label" for="issueLine">產線</label><input class="wo-input" id="issueLine"></div>
         <div class="wo-field"><label class="wo-field-label" for="issueMachine">機台 *</label><input class="wo-input" id="issueMachine" placeholder="例如 CNC-LINE-01"></div>
         <div class="wo-field"><label class="wo-field-label" for="issueAlarmCode">警報代碼</label><input class="wo-input" id="issueAlarmCode" placeholder="不知道可留空"></div>
-        <div class="wo-field"><label class="wo-field-label" for="issueManual">手冊</label><select class="wo-select" id="issueManual"><option value="808d">808D</option><option value="840d">840D</option><option value="840dsl">840D sl</option></select></div>
+        <div class="wo-field"><label class="wo-field-label" for="issueManual">手冊</label><select class="wo-select" id="issueManual" data-company-collections><option value="">載入知識庫…</option></select></div>
         <div class="wo-field"><label class="wo-field-label" for="issueSeverity">嚴重度</label><select class="wo-select" id="issueSeverity"><option value="medium">中</option><option value="low">低</option><option value="high">高</option><option value="critical">緊急</option></select></div>
         <div class="wo-field wo-field-full"><label class="wo-field-label" for="issueDescription">問題描述 *</label><textarea class="wo-text" id="issueDescription" placeholder="描述看到的異常、機台狀態、正在執行的作業"></textarea></div>
       </div>
@@ -108,8 +109,9 @@
 
 <script src="/static/js/core/api.js"></script>
 <script src="/static/js/core/storage.js"></script>
-<script src="/static/alarm_app.js"></script>
-<script src="/static/js/modules/audit.js"></script>
-<script src="/static/js/pages/operator.js?v=quality-3"></script>
+<script src="/static/alarm_app.js?v=password-1"></script>
+<script src="/static/js/modules/audit.js?v=audit-readable-2"></script>
+<script src="/static/js/pages/operator.js?v=audit-zh-1"></script>
+<script src="/static/js/modules/password-settings.js?v=1"></script>
 </body>
 </html>

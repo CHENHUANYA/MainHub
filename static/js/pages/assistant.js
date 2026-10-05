@@ -24,7 +24,7 @@
     if (!app || !panel) {
       return;
     }
-    const collection = app.getState?.('lookupManual') || '808d';
+    const collection = app.getState?.('lookupManual') || window.AlarmApp.getState('defaultManual');
     let host = document.getElementById('phase2ReferenceHost');
     if (!host) {
       host = document.createElement('div');
@@ -74,7 +74,8 @@
 
   window.filterRefTable = filterRefTable;
 
-  document.addEventListener('DOMContentLoaded', () => {
+  document.addEventListener('DOMContentLoaded', async () => {
+  if (!await window.AlarmApp?.loadCompanyConfig()) return;
     const app = window.AlarmApp;
     if (!app) {
       return;

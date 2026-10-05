@@ -2,12 +2,19 @@
 
 Delivery closeout status is tracked in `docs/reports/DELIVERY_RISK_STATUS.md`.
 
+## Local Ollama
+
+MaintHub uses local Ollama with `gemma4:e2b` for generation. There is no external
+LLM provider or provider failover. Prepare the model with `ollama pull gemma4:e2b`
+before offline operation. Native Python uses `http://127.0.0.1:11434`; Docker uses
+`http://host.docker.internal:11434` to reach Ollama on the same host.
+See [地端模型設定](LOCAL_OLLAMA_ZH_TW.md) for setup and verification.
+
 ## Windows
 
 1. Install Docker Desktop.
 2. Copy `.env.example` to `.env`.
-3. Set `ADMIN_INITIAL_PASSWORD`, `N8N_ENCRYPTION_KEY`,
-   `ALARM_RAG_TRIGGER_TOKEN`, `ALARM_RAG_INDEX_SIGNING_KEY`, and
+3. Set `ADMIN_INITIAL_PASSWORD`, `ALARM_RAG_TRIGGER_TOKEN`, `ALARM_RAG_INDEX_SIGNING_KEY`, and
    `QDRANT_API_KEY`, or generate them:
 
 ```powershell
@@ -38,6 +45,16 @@ python scripts/bootstrap_env.py --reset-bootstrap-passwords --show-admin-passwor
 python scripts/preflight_check.py
 docker compose up -d
 ```
+
+The default stack does not start n8n. Enable it with `COMPOSE_PROFILES=automation`
+or `docker compose --profile automation up -d`; then set `N8N_ENCRYPTION_KEY`
+and include `--with-automation` in preflight/acceptance commands if the profile
+is not set in the environment.
+
+For a required local model check from the host, run
+`python scripts/preflight_check.py --ollama-url http://127.0.0.1:11434 --require-ollama-model --require-model-cache`.
+This checks installation, not generation. The URL override applies only to the
+check process; also verify that the running application can reach Ollama.
 
 ## Linux Server
 
@@ -72,7 +89,7 @@ deployment secrets:
 docker compose stop alarm_rag
 python scripts/bootstrap_env.py --rotate-secrets --reset-bootstrap-passwords --show-admin-password
 python scripts/sign_bm25_indexes.py --trust-existing-files
-docker compose up -d --force-recreate alarm_rag qdrant n8n
+docker compose up -d --force-recreate alarm_rag qdrant
 ```
 
 This regenerates `ADMIN_INITIAL_PASSWORD`, `ALARM_RAG_TRIGGER_TOKEN`,
@@ -80,19 +97,13 @@ This regenerates `ADMIN_INITIAL_PASSWORD`, `ALARM_RAG_TRIGGER_TOKEN`,
 `.env`, then resets seeded
 role-account passwords to the new admin password. Recreate `qdrant`
 and `alarm_rag` together so both receive the new API key. Re-import or
-update n8n workflows after rotation so they use
+update n8n workflows after rotation when automation is enabled, and recreate
+it with `docker compose --profile automation up -d --force-recreate n8n` so it uses
 the new `ALARM_RAG_TRIGGER_TOKEN`. If real n8n credentials are stored, changing
 `N8N_ENCRYPTION_KEY` can make old encrypted credentials unreadable; export or
 recreate them during the rotation window. Keep `alarm_rag` stopped between the
 index-key rotation and re-signing so an old process cannot write a sidecar with
 the previous key.
-
-External provider credentials such as `SCHOOL_API_KEY` cannot be generated
-locally. Replace them with a newly issued provider key, then run:
-
-```bash
-python scripts/rag_runtime_check.py --base-url http://localhost:8100 --manual 808d --alarm-code 3000 --require-vector-coverage --check-school-api
-```
 
 ### PostgreSQL file-secret injection
 
@@ -246,9 +257,8 @@ Enter the real HTTPS URL and the absolute deployed checkout path for every
 dispatch. The gate refuses to proceed unless the deployed Git revision matches
 the dispatched revision, then runs strict standalone acceptance, HTTPS/HSTS
 boundary validation, read-only responsive browser E2E, RAG runtime checks, a
-four-hour soak with the 30-second P95 SLO, and optional restart recovery. It deliberately does not pass
-`--check-school-api`, so the School API success path remains outside the pilot
-release gate.
+four-hour soak with the 30-second P95 SLO, and optional restart recovery. Generation
+is verified against the local Ollama model.
 
 For a controlled local Compose restart-recovery drill after the soak:
 
@@ -302,11 +312,6 @@ For a local compose sanity check of the same script:
 ```bash
 python scripts/production_boundary_check.py --base-url http://localhost:8100 --allow-http-local --skip-stream
 ```
-
-To directly validate a configured School API provider credential, add
-`--check-school-api`. A `4xx` response means the service is reachable but the
-credential or request authorization must be fixed before switching production
-traffic to that provider.
 
 ## Login Troubleshooting
 

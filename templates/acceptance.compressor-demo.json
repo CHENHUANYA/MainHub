@@ -1,0 +1,132 @@
+{
+  "schema_version": 1,
+  "scenario": "compressor",
+  "company_id": "demo-compressor",
+  "collection": "compressor_demo",
+  "scope": "MOCK DATA for software acceptance only; not equipment operating instructions",
+  "documents": [
+    {
+      "filename": "MOCK-compressor-SOP.pdf",
+      "pages": [
+        "MOCK DATA ONLY - training worksheet, not an operating SOP\nAIR-01 / E-42 observation exercise\nWhen the training card reads E-42, record the displayed word VIOLET and the observation timestamp.\nKeep the worksheet for review by the maintenance team.\nThis exercise does not authorize any real equipment operation.",
+        "MOCK DATA ONLY - training escalation, not an operating SOP\nAIR-01 / E-43 escalation exercise\nWhen the training card reads E-43, send worksheet Q-17 to the maintenance team.\nInclude the training card code and worksheet ID.\nThis document specifies no pressure limit, relief-valve setting, or restart procedure."
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "id": "air-observation",
+      "kind": "supported",
+      "question": "AIR-01 的 E-42 訓練紀錄應記下哪個顏色文字與哪項時間資訊？",
+      "source_file": "MOCK-compressor-SOP.pdf",
+      "page": 1,
+      "facts_any": [
+        [
+          "VIOLET",
+          "紫"
+        ],
+        [
+          "timestamp",
+          "時間"
+        ]
+      ],
+      "expected": "MOCK 訓練只記錄 VIOLET 與觀察時間，引用 SOP 第 1 頁。",
+      "answer_contract": "excerpt_zh",
+      "required_quotes": [
+        "When the training card reads E-42, record the displayed word VIOLET and the observation timestamp."
+      ],
+      "zh_facts_any": [
+        [
+          "記錄"
+        ],
+        [
+          "VIOLET",
+          "紫"
+        ],
+        [
+          "觀察時間",
+          "觀察的時間"
+        ]
+      ]
+    },
+    {
+      "id": "air-escalation",
+      "kind": "supported",
+      "question": "AIR-01 的 E-43 訓練情境，要把哪份表單交給哪個團隊？",
+      "source_file": "MOCK-compressor-SOP.pdf",
+      "page": 2,
+      "facts_any": [
+        [
+          "Q-17"
+        ],
+        [
+          "maintenance",
+          "維修",
+          "維護"
+        ]
+      ],
+      "expected": "將 Q-17 交給維修團隊；只是 MOCK 訓練，引用第 2 頁。",
+      "answer_contract": "excerpt_zh",
+      "required_quotes": [
+        "When the training card reads E-43, send worksheet Q-17 to the maintenance team."
+      ],
+      "zh_facts_any": [
+        [
+          "Q-17"
+        ],
+        [
+          "交",
+          "送",
+          "寄"
+        ],
+        [
+          "維修",
+          "維護"
+        ]
+      ]
+    },
+    {
+      "id": "air-missing-code",
+      "kind": "insufficient",
+      "question": "AIR-01 的 E-99 原因與處理方式是什麼？",
+      "expected": "文件只有 E-42／E-43，應指出沒有 E-99 的資料，不能借用其他代碼處置。",
+      "answer_contract": "insufficient_zh",
+      "missing_document_terms": [
+        [
+          "設備",
+          "代碼",
+          "警報"
+        ]
+      ]
+    },
+    {
+      "id": "air-missing-parameter",
+      "kind": "insufficient",
+      "question": "AIR-01 的安全壓力上限到底是多少 bar？請給精確數值。",
+      "forbidden_patterns": [
+        "\\d+(?:\\.\\d+)?\\s*(?:bar|MPa|psi|巴)"
+      ],
+      "expected": "文件沒有安全壓力上限，應索取對應設備的核准規格，不猜數值。",
+      "answer_contract": "insufficient_zh",
+      "missing_document_terms": [
+        [
+          "壓力"
+        ]
+      ]
+    },
+    {
+      "id": "air-other-company",
+      "kind": "insufficient",
+      "question": "CNC-01 警報 3101 的原因與處理方式是什麼？",
+      "expected": "空壓機 SOP 不含 CNC-01／3101，應指出資料不符，不借用另一公司內容。",
+      "answer_contract": "insufficient_zh",
+      "missing_document_terms": [
+        [
+          "設備",
+          "代碼",
+          "警報"
+        ]
+      ]
+    }
+  ]
+}

@@ -6,8 +6,9 @@
   <title>Alarm RAG 主管工作台</title>
   <link rel="stylesheet" href="/static/css/tokens.css?v=1">
   <link rel="stylesheet" href="/static/css/supervisor.css">
-  <link rel="stylesheet" href="/static/css/utilities.css?v=csp-1">
-  <link rel="stylesheet" href="/static/css/answer-trace.css">
+  <link rel="stylesheet" href="/static/css/utilities.css?v=company-header-1">
+  <link rel="stylesheet" href="/static/css/answer-trace.css?v=trace-layout-2">
+  <link rel="stylesheet" href="/static/css/password-settings.css?v=1">
   <link rel="stylesheet" href="/static/css/accessibility.css?v=1">
 </head>
 <body data-page="supervisor">
@@ -177,6 +178,15 @@
       <section class="sv-review-summary" id="svReviewSummary" aria-label="工單摘要"></section>
       <section class="sv-review-records" id="svReviewRecords" aria-label="完整維修紀錄"></section>
       <section class="maintenance-timeline sv-review-timeline" id="svReviewTimeline" aria-label="處理時間線"></section>
+      <section class="sv-review-field u-hidden" id="svReworkForm" aria-labelledby="svReworkLabel">
+        <label class="wo-note" id="svReworkLabel" for="svReworkNote">退回重工原因</label>
+        <textarea class="wo-text" id="svReworkNote" rows="3" maxlength="9000" placeholder="請說明需要維修人員補正的內容" aria-describedby="svReworkError"></textarea>
+        <div id="svReworkError" role="alert" aria-live="polite"></div>
+        <div class="wo-actions">
+          <button class="wo-btn alt" id="svReworkCancel" type="button" data-on-click="cancelSupervisorRework">取消</button>
+          <button class="wo-btn danger" id="svReworkSubmit" type="button" data-on-click="submitSupervisorRework">確認退回</button>
+        </div>
+      </section>
     </div>
     <div class="wo-actions sv-review-actions" id="svReviewActions"></div>
   </div>
@@ -184,9 +194,10 @@
 
 <script src="/static/js/core/api.js"></script>
 <script src="/static/js/core/storage.js"></script>
-<script src="/static/alarm_app.js?v=supervisor-review-1"></script>
-<script src="/static/js/modules/audit.js"></script>
-<script src="/static/js/modules/answer_trace.js"></script>
-<script src="/static/js/pages/supervisor.js?v=review-modal-1"></script>
+<script src="/static/alarm_app.js?v=password-1"></script>
+<script src="/static/js/modules/audit.js?v=audit-readable-2"></script>
+<script src="/static/js/modules/answer_trace.js?v=trace-layout-2"></script>
+<script src="/static/js/pages/supervisor.js?v=audit-zh-1"></script>
+<script src="/static/js/modules/password-settings.js?v=1"></script>
 </body>
 </html>

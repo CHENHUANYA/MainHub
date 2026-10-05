@@ -9,46 +9,8 @@ const SUPERVISOR_EDITABLE_STATUSES = ['pending', 'assigned', 'in_progress', 'can
 const SUPERVISOR_PRIORITY_SCORE = { critical: 0, high: 1, medium: 2, low: 3 };
 const SUPERVISOR_SECTIONS = new Set(['overview', 'verification', 'responsibility', 'lines', 'audit']);
 
-const SUPERVISOR_STATUS_LABELS = {
-  open: '未處理',
-  assigned: '已指派',
-  in_progress: '處理中',
-  completed: '待驗證',
-  verified: '已驗證',
-  cancelled: '已取消',
-  pending: '待處理',
-};
-
-const SUPERVISOR_AUDIT_ACTION_LABELS = {
-  created: '建立工單',
-  updated: '更新維修紀錄',
-  status_changed: '變更狀態',
-  issue_synced: '同步問題狀態',
-  knowledge_approve: '核准知識',
-  knowledge_needs_revision: '退回知識補充',
-  knowledge_reject: '不採用知識',
-  import_status_override: '匯入狀態更新',
-};
-
-const SUPERVISOR_FIELD_LABELS = {
-  status: '狀態',
-  description: '問題描述',
-  root_cause: '根本原因',
-  repair_action: '實際維修動作',
-  resolution: '處理結果',
-  notes: '備註',
-  assigned_to: '負責人',
-  accepted_by: '接受人員',
-  completed_by: '完成人員',
-  verified_by: '驗證人員',
-  priority: '優先等級',
-  failure_category: '故障分類',
-  kb_candidate: '知識候選',
-  kb_review_status: '知識審核狀態',
-};
-
-function supervisorLabel(value, labels = SUPERVISOR_STATUS_LABELS) {
-  return labels[value] || value || '-';
+function supervisorLabel(value, labels) {
+  return labels ? (labels[value] || value || '-') : window.AlarmAudit.statusLabel(value);
 }
 
 function activeSupervisorSectionFromHash() {
@@ -292,22 +254,8 @@ function supervisorReviewField(app, title, value, wide = false) {
   </article>`;
 }
 
-function supervisorReviewChangeValue(app, field, value) {
-  if (field === 'status') return app.esc(supervisorLabel(value));
-  if (typeof value === 'boolean') return value ? '是' : '否';
-  if (value === null || value === undefined || value === '') return '-';
-  if (typeof value === 'object') return app.esc(JSON.stringify(value));
-  return app.esc(String(value));
-}
-
 function renderSupervisorReviewChanges(app, event) {
-  const changes = Array.isArray(event?.changes) ? event.changes : [];
-  if (!changes.length) return '';
-  return `<div class="audit-fields">${changes.map((change) => {
-    const field = String(change.field || '');
-    const label = SUPERVISOR_FIELD_LABELS[field] || field;
-    return `<div><b>${app.esc(label)}</b>：${supervisorReviewChangeValue(app, field, change.from)} → ${supervisorReviewChangeValue(app, field, change.to)}</div>`;
-  }).join('')}</div>`;
+  return window.AlarmAudit.renderChanges(app, event);
 }
 
 function groupSupervisorReviewEvents(events) {
@@ -351,7 +299,7 @@ function renderSupervisorReviewTimeline(app, order, issue) {
   box.innerHTML = `<div class="sv-review-section-title">處理時間線 <span>${groups.length} 項事件${mergedCount ? ` · 已合併 ${mergedCount} 筆相同紀錄` : ''}</span></div>
     ${groups.map(({ event, count }) => {
       const source = event.audit_source === 'issue' ? '問題' : '工單';
-      const action = SUPERVISOR_AUDIT_ACTION_LABELS[event.action] || event.action || '更新';
+      const action = window.AlarmAudit.actionLabel(event.action, event.audit_source) || '更新';
       const statusText = event.from_status || event.to_status
         ? `${supervisorLabel(event.from_status)} → ${supervisorLabel(event.to_status)}`
         : '';
@@ -375,9 +323,10 @@ function openSupervisorReviewModal(orderId) {
   const modal = app.$('svReviewModal');
   if (!modal) return;
 
+  cancelSupervisorRework();
   app.setState('supervisorCurrentReviewOrderId', orderId);
   app.$('svReviewModalTitle').textContent = `完整維修紀錄 · 工單 #${order.id}`;
-  app.$('svReviewModalSubtitle').textContent = `問題 ${order.issue_id || 'N/A'} · ${String(order.manual || '808d').toUpperCase()}`;
+  app.$('svReviewModalSubtitle').textContent = `問題 ${order.issue_id || 'N/A'} · ${String(order.manual || window.AlarmApp.getState('defaultManual')).toUpperCase()}`;
 
   const startedAt = supervisorReviewStartTime(order);
   const completedAt = order.completed_at || order.updated_at || '';
@@ -426,6 +375,8 @@ function closeSupervisorReviewModal() {
   const app = supervisorApp();
   const modal = app?.$('svReviewModal');
   if (!app || !modal) return;
+  if (app.getState('supervisorReworkSubmitting')) return;
+  cancelSupervisorRework();
   modal.classList.remove('show');
   app.setState('supervisorCurrentReviewOrderId', null);
   const returnFocus = app.getState('supervisorReviewReturnFocus');
@@ -639,7 +590,6 @@ function supervisorIssueVersion(app, issueId) {
 function supervisorWorkOrderPatch(app, orderId, values) {
   const version = supervisorOrderVersion(app, orderId);
   return {
-    updated_by: app.currentUserId(),
     ...values,
     ...(values.version !== undefined || version === undefined ? {} : { version }),
   };
@@ -797,19 +747,17 @@ async function loadSupervisorConsole() {
 
 async function verifySupervisorOrder(orderId) {
   const app = supervisorApp();
+  if (app?.getState('supervisorReworkSubmitting')) return;
   const order = (app?.getState('supervisorOrders') || []).find((item) => item.id === orderId);
   if (!app || !order) {
     return;
   }
   try {
-    const userId = app.currentUserId();
     await app.apiJson(`/work-orders/${encodeURIComponent(orderId)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         status: 'verified',
-        verified_by: userId,
-        updated_by: userId,
         ...(order.version === undefined ? {} : { version: order.version }),
       }),
     });
@@ -821,17 +769,49 @@ async function verifySupervisorOrder(orderId) {
   }
 }
 
-async function requestSupervisorRework(issueId) {
+function cancelSupervisorRework() {
   const app = supervisorApp();
-  if (!app) {
+  if (!app || app.getState('supervisorReworkSubmitting')) return;
+  app.$('svReworkForm')?.classList.add('u-hidden');
+  app.$('svReviewActions')?.classList.remove('u-hidden');
+  if (app.$('svReworkNote')) app.$('svReworkNote').value = '';
+  if (app.$('svReworkError')) app.$('svReworkError').textContent = '';
+  app.setState('supervisorReworkIssueId', null);
+  app.setState('supervisorReworkVersion', undefined);
+}
+
+function requestSupervisorRework(issueId) {
+  const app = supervisorApp();
+  const form = app?.$('svReworkForm');
+  if (!app || !form || app.getState('supervisorReworkSubmitting')) return;
+  cancelSupervisorRework();
+  app.setState('supervisorReworkIssueId', issueId);
+  app.setState('supervisorReworkVersion', supervisorIssueVersion(app, issueId));
+  form.classList.remove('u-hidden');
+  app.$('svReviewActions')?.classList.add('u-hidden');
+  form.scrollIntoView?.({ block: 'nearest' });
+  app.$('svReworkNote')?.focus();
+}
+
+async function submitSupervisorRework() {
+  const app = supervisorApp();
+  const issueId = app?.getState('supervisorReworkIssueId');
+  if (!app || !issueId || app.getState('supervisorReworkSubmitting')) return;
+  const input = app.$('svReworkNote');
+  const errorBox = app.$('svReworkError');
+  const note = (input?.value || '').trim();
+  if (!note || note.length > 9000) {
+    errorBox.textContent = !note ? '請填寫退回原因。' : '退回原因請勿超過 9000 字。';
+    input?.focus();
     return;
   }
-  const note = window.prompt('請輸入退回重工原因');
-  if (!note) {
-    return;
-  }
+  errorBox.textContent = '';
+  app.setState('supervisorReworkSubmitting', true);
+  app.$('svReworkSubmit').disabled = true;
+  app.$('svReworkCancel').disabled = true;
+  app.$('svReworkSubmit').textContent = '退回中…';
   try {
-    const version = supervisorIssueVersion(app, issueId);
+    const version = app.getState('supervisorReworkVersion');
     await app.apiJson(`/issues/${encodeURIComponent(issueId)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -841,15 +821,22 @@ async function requestSupervisorRework(issueId) {
         ...(version === undefined ? {} : { version }),
       }),
     });
+    app.setState('supervisorReworkSubmitting', false);
     setSupervisorResult(`Issue ${issueId} 已退回重工`);
     closeSupervisorReviewModal();
     await loadSupervisorConsole();
   } catch (error) {
-    setSupervisorResult(app.formatError(error, '退回重工失敗'), true);
+    errorBox.textContent = app.formatError(error, '退回重工失敗；請重新載入工單確認狀態後再操作。');
+  } finally {
+    app.setState('supervisorReworkSubmitting', false);
+    app.$('svReworkSubmit').disabled = false;
+    app.$('svReworkCancel').disabled = false;
+    app.$('svReworkSubmit').textContent = '確認退回';
   }
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  if (!await window.AlarmApp?.loadCompanyConfig()) return;
   const app = supervisorApp();
   if (!app) {
     return;
@@ -881,6 +868,8 @@ window.openSupervisorReviewModal = openSupervisorReviewModal;
 window.closeSupervisorReviewModal = closeSupervisorReviewModal;
 window.verifySupervisorOrder = verifySupervisorOrder;
 window.requestSupervisorRework = requestSupervisorRework;
+window.cancelSupervisorRework = cancelSupervisorRework;
+window.submitSupervisorRework = submitSupervisorRework;
 window.exportSupervisorCsv = exportSupervisorCsv;
 window.updateSupervisorOrder = updateSupervisorOrder;
 window.bulkUpdateSupervisorOrders = bulkUpdateSupervisorOrders;

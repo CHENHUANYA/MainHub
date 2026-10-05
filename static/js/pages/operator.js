@@ -425,25 +425,26 @@ function renderOperatorNotes(issue) {
 
   return notes.map((note) => `<div class="operator-note-item">
     <div class="operator-note-meta">${app.esc(note.created_by || 'operator')} · ${app.esc(formatOperatorTime(note.created_at))}</div>
-    <div class="operator-note-text">${app.esc(note.note || '')}</div>
+    <div class="operator-note-text">${app.esc(window.AlarmAudit.displayNote(note.note))}</div>
   </div>`).join('');
 }
 
 function renderOperatorIssueHistory(issue) {
   const app = operatorApp();
-  const history = Array.isArray(issue.issue_history) ? issue.issue_history : [];
-  if (!history.length) return '<div class="wo-empty">No audit events yet.</div>';
+  const history = window.AlarmAudit?.uniqueEvents(issue.issue_history)
+    || (Array.isArray(issue.issue_history) ? issue.issue_history : []);
+  if (!history.length) return '<div class="wo-empty">目前沒有歷程紀錄</div>';
 
   return history.slice().reverse().map((event) => {
     const statusText = event.from_status || event.to_status
-      ? `${event.from_status || '-'} -> ${event.to_status || '-'}`
+      ? `${window.AlarmAudit.statusLabel(event.from_status)} → ${window.AlarmAudit.statusLabel(event.to_status)}`
       : '';
     const changes = window.AlarmAudit?.renderChanges(app, event) || '';
     return `<div class="audit-event">
       <div class="audit-dot"></div>
       <div class="audit-body">
-        <div class="audit-title">${app.esc(event.action || 'updated')} ${statusText ? `<span>${app.esc(statusText)}</span>` : ''}</div>
-        <div class="audit-meta">${app.esc(event.user_id || 'system')} · ${app.esc(formatOperatorTime(event.created_at))}</div>
+        <div class="audit-title">${app.esc(window.AlarmAudit.actionLabel(event.action, 'issue'))} ${statusText ? `<span>${app.esc(statusText)}</span>` : ''}</div>
+        <div class="audit-meta">${app.esc(event.user_id || '系統')} · ${app.esc(formatOperatorTime(event.created_at))}</div>
         ${changes}
       </div>
     </div>`;
@@ -457,13 +458,13 @@ function renderOperatorLinkedWorkOrder(issue) {
   const order = getOperatorWorkOrder(issue.work_order_id);
   if (!order) {
     return `<div class="operator-detail-block">
-      <div class="operator-detail-label">Linked work order</div>
+      <div class="operator-detail-label">關聯工單</div>
       <div class="operator-detail-text">#${app.esc(issue.work_order_id)}</div>
     </div>`;
   }
 
   return `<div class="operator-detail-block">
-    <div class="operator-detail-label">Linked work order</div>
+    <div class="operator-detail-label">關聯工單</div>
     <div class="operator-detail-grid">
       <div><div class="operator-detail-label">工單</div><div class="operator-detail-value">#${app.esc(order.id)}</div></div>
       <div><div class="operator-detail-label">狀態</div><div class="operator-detail-value">${app.esc(workOrderStatusLabel(order.status))}</div></div>
@@ -545,7 +546,7 @@ function openOperatorIssueModal(issueId, mode = 'view') {
       ${canAddOperatorNote(issue) && !isEditing ? '<textarea class="wo-text operator-note-input" id="operatorNoteInput" placeholder="補充現場狀況、復現步驟或重新開啟原因"></textarea>' : ''}
     </div>
     <div class="operator-detail-block">
-      <div class="operator-detail-label">Audit timeline</div>
+      <div class="operator-detail-label">處理時間線</div>
       <div class="audit-list">${renderOperatorIssueHistory(issue)}</div>
     </div>
     <div class="wo-actions">${renderOperatorIssueActions(issue, isEditing)}</div>`;
@@ -752,7 +753,8 @@ async function loadOperatorIssues() {
   }
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  if (!await window.AlarmApp?.loadCompanyConfig()) return;
   const app = operatorApp();
   if (!app) return;
 

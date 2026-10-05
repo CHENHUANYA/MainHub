@@ -23,7 +23,6 @@ from app_context import (
     CHAT_SYSTEM_PROMPT,
     FREE_CHAT_SYSTEM,
     LLM_TIMEOUT_SECONDS,
-    LLM_PROVIDER,
     NOT_READY_TEMPLATE,
     OLLAMA_MODEL,
     OLLAMA_KEEP_ALIVE,
@@ -32,10 +31,6 @@ from app_context import (
     RAG_CHAT_TOP_K,
     RAG_CONTEXT_CHARS_PER_DOC,
     RAG_OLLAMA_NUM_CTX,
-    SCHOOL_API_BASE_URL,
-    SCHOOL_API_FALLBACK_TO_OLLAMA,
-    SCHOOL_API_KEY,
-    SCHOOL_API_MODEL,
     ChatRequest,
     build_augmented_messages,
     build_grounded_diagnostic_answer,
@@ -55,15 +50,20 @@ from app_context import (
 )
 from auth import actor_id, get_actor
 from config_values import env_float
+from services.company_config import collection_config, default_manual, validate_registered_collection
 from observability import runtime_metrics
 from repositories.rag_answers import RagAnswerRepository
 from rag_engine import extract_alarm_codes
+from services.prompt_profiles import prompts_for_collection
+from services.answer_format import (
+    INCOMPLETE_ANSWER, complete_document_request, maintenance_format_issues,
+    repair_messages, requires_answer_check,
+)
+from services.evidence_guard import missing_identifier_answer, missing_requested_identifiers, mock_evidence_notice
 from storage import ERROR_LOG_PATH, append_jsonl
 from services.llm_clients import (
     OllamaClientConfig,
-    SchoolClientConfig,
     call_ollama as call_ollama_client,
-    call_school_api as call_school_api_client,
     stream_ollama as stream_ollama_client,
 )
 from services.chat_streaming import StreamDependencies, stream_chat_events as assemble_stream_chat_events
@@ -143,6 +143,10 @@ async def _run_bounded_retrieval(actor: dict, reserved_tokens: int, operation):
 def validate_collection_name(collection_name: str) -> dict | None:
     if not is_safe_path_segment(collection_name):
         return {"status": "error", "message": "Invalid collection name"}
+    try:
+        validate_registered_collection(collection_name)
+    except ValueError as exc:
+        return {"status": "error", "message": str(exc)}
     return None
 
 
@@ -218,39 +222,9 @@ async def stream_ollama(messages: list[dict], temperature: float, max_tokens: in
         yield content
 
 
-async def call_school_api(messages: list[dict], temperature: float, max_tokens: int) -> str:
-    return await call_school_api_client(
-        messages,
-        temperature,
-        max_tokens,
-        SchoolClientConfig(
-            base_url=SCHOOL_API_BASE_URL,
-            api_key=SCHOOL_API_KEY,
-            model=SCHOOL_API_MODEL,
-            timeout_seconds=LLM_TIMEOUT_SECONDS,
-            max_output_tokens=RAG_MAX_OUTPUT_TOKENS,
-        ),
-    )
-
-
 async def call_llm(messages: list[dict], temperature: float, max_tokens: int) -> str:
     global last_llm_source
     request_llm_source.set("none")
-    if LLM_PROVIDER in {"school", "openai", "openai-compatible"}:
-        try:
-            content = await call_school_api(messages, temperature, max_tokens)
-            last_llm_source = "school"
-            request_llm_source.set("school")
-            return content
-        except httpx.HTTPStatusError as exc:
-            if not SCHOOL_API_FALLBACK_TO_OLLAMA or exc.response.status_code < 500:
-                raise
-            logger.warning("School API failed with %s; falling back to Ollama", exc.response.status_code)
-        except httpx.HTTPError as exc:
-            if not SCHOOL_API_FALLBACK_TO_OLLAMA:
-                raise
-            logger.warning("School API connection failed (%s); falling back to Ollama", exc.__class__.__name__)
-
     content = await call_ollama(messages, temperature, max_tokens)
     last_llm_source = "ollama"
     request_llm_source.set("ollama")
@@ -332,6 +306,16 @@ async def call_llm_with_retrieval_guard(
     temperature: float,
     max_tokens: int,
 ) -> str:
+    if requires_answer_check(messages):
+        content = await call_llm(messages, temperature, max_tokens)
+        issues = maintenance_format_issues(content, docs)
+        if issues:
+            logger.warning('Maintenance answer format rejected; retrying once')
+            content = await call_llm(repair_messages(messages, issues), 0.0, max_tokens)
+            if maintenance_format_issues(content, docs):
+                request_llm_source.set('answer_guard')
+                return INCOMPLETE_ANSWER
+        return complete_document_request(content, user_query)
     generation_max_tokens = min(max_tokens, 256) if is_troubleshooting_query(user_query) else max_tokens
     content = await call_llm(messages, temperature, generation_max_tokens)
     if not answer_conflicts_with_retrieval(content, user_query, docs):
@@ -389,10 +373,10 @@ async def save_rag_answer_async(**kwargs) -> bool:
 
 
 def classify_answer_state(provider: str) -> str:
+    if provider == "answer_guard":
+        return "fallback"
     if provider == "unavailable":
         return "unavailable"
-    if LLM_PROVIDER == "school" and provider == "ollama":
-        return "fallback"
     return "complete"
 
 
@@ -454,9 +438,7 @@ def stream_chat_events(
         start_ts=start_ts,
         retrieval_ms=retrieval_ms,
         dependencies=StreamDependencies(
-            provider_name=LLM_PROVIDER,
             ollama_model=OLLAMA_MODEL,
-            school_model=SCHOOL_API_MODEL,
             is_troubleshooting_query=is_troubleshooting_query,
             stream_ollama=stream_ollama,
             call_with_retrieval_guard=call_llm_with_retrieval_guard,
@@ -521,9 +503,14 @@ async def handle_chat(req: ChatRequest, collection_name: str, actor: dict | None
     response_id = new_answer_id()
     temperature = req.temperature if req.temperature is not None else 0.1
     max_tokens = req.max_tokens or 1024
-    grounded_answer = build_grounded_diagnostic_answer(user_query, docs)
+    missing_identifiers = missing_requested_identifiers(user_query, docs)
+    grounded_provider = "evidence_guard" if missing_identifiers else "retrieval"
+    grounded_answer = missing_identifier_answer(missing_identifiers) if missing_identifiers else (
+        build_grounded_diagnostic_answer(user_query, docs)
+        if collection_config(collection_name).prompt_profile == "cnc_maintenance_v1" else ""
+    )
     if grounded_answer:
-        content = grounded_answer
+        content = mock_evidence_notice(docs) + grounded_answer
         elapsed_ms = int((time.time() - start_ts) * 1000)
         record_query(collection_name, user_query, source="api-grounded", elapsed_ms=elapsed_ms)
         await save_rag_answer_async(
@@ -532,7 +519,7 @@ async def handle_chat(req: ChatRequest, collection_name: str, actor: dict | None
             collection=collection_name,
             answer=content,
             rag_metadata=rag_metadata,
-            provider="retrieval",
+            provider=grounded_provider,
             model="",
             elapsed_ms=elapsed_ms,
             created_by=actor_id(actor),
@@ -543,7 +530,7 @@ async def handle_chat(req: ChatRequest, collection_name: str, actor: dict | None
             retrieval_ms=retrieval_ms,
             model_ms=0,
             total_ms=(time.monotonic() - request_started) * 1000,
-            provider="retrieval",
+            provider=grounded_provider,
             outcome="complete",
             streaming=streaming,
         )
@@ -601,7 +588,6 @@ async def handle_chat(req: ChatRequest, collection_name: str, actor: dict | None
             record_metric=runtime_metrics.record_rag,
             make_response=make_openai_response,
             ollama_model=OLLAMA_MODEL,
-            school_model=SCHOOL_API_MODEL,
         ),
     )
 
@@ -614,7 +600,7 @@ async def limited_chat(req: ChatRequest, collection_name: str, actor: dict):
                 req.messages,
                 req.max_tokens or 1024,
                 additional_utf8_bytes=(
-                    len(CHAT_SYSTEM_PROMPT.encode("utf-8"))
+                    max(len(value.encode("utf-8")) for value in prompts_for_collection(collection_name).values())
                     + RAG_CHAT_TOP_K * RAG_CONTEXT_CHARS_PER_DOC * 4
                 ),
             ),
@@ -638,10 +624,14 @@ async def limited_chat(req: ChatRequest, collection_name: str, actor: dict):
 
 
 @router.post("/v1/chat/completions", responses=CHAT_RESPONSES)
-async def chat_default(req: ChatRequest, collection: str = "alarms", actor: dict = Depends(get_actor)):
+async def chat_default(req: ChatRequest, collection: str = "", actor: dict = Depends(get_actor)):
     denied = require_authenticated(actor)
     if denied:
         return denied
+    collection = collection or default_manual()
+    invalid = validate_collection_name(collection)
+    if invalid:
+        return invalid
     return await limited_chat(req, collection, actor)
 
 
@@ -653,13 +643,14 @@ async def free_chat(req: ChatRequest, actor: dict = Depends(get_actor)):
     denied = require_authenticated(actor)
     if denied:
         return denied
+    system_prompt = prompts_for_collection()["free"]
     try:
         lease = await ai_usage_guard.acquire(
             actor_id(actor),
             estimate_reserved_tokens(
                 req.messages,
                 req.max_tokens or 1024,
-                additional_utf8_bytes=len(FREE_CHAT_SYSTEM.encode("utf-8")),
+                additional_utf8_bytes=len(system_prompt.encode("utf-8")),
             ),
         )
     except AIUsageLimitExceeded as exc:
@@ -669,7 +660,7 @@ async def free_chat(req: ChatRequest, actor: dict = Depends(get_actor)):
             content={"status": "error", "message": str(exc)},
         )
     try:
-        messages = [{"role": "system", "content": FREE_CHAT_SYSTEM}]
+        messages = [{"role": "system", "content": system_prompt}]
         messages.extend({"role": m.role, "content": m.content} for m in req.messages)
         try:
             content = await call_llm(

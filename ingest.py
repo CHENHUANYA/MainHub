@@ -18,6 +18,7 @@ from sentence_transformers import SentenceTransformer
 from rank_bm25 import BM25Okapi
 from bm25_text import BM25_TOKENIZER_VERSION, tokenize_bm25
 from signed_pickle import dump_signed_pickle
+from services.company_config import collection_config
 from vector_store import get_store
 from storage import (
     DB_PATH,
@@ -209,7 +210,9 @@ def extract_alarm_sections(
                 i = j + 1
                 continue
 
-        if cur_code and not is_skip_line(line):
+        # Field labels are evidence, not page furniture. Removing them makes
+        # the model guess which sentences describe reactions versus remedies.
+        if cur_code and (line in SKIP_LINES or not is_skip_line(line)):
             if not (ALARM_CODE_RE.match(line.strip()) and _looks_like_page_number(line, all_lines, i)):
                 cur_lines.append(line)
 
@@ -399,6 +402,79 @@ def extract_general_chunks(
     return chunks
 
 
+def extract_text_chunks(
+    pdf_path: str,
+    chunk_size: int = 40,
+    overlap: int = 8,
+    *,
+    max_chars: int | None = None,
+    max_lines: int | None = None,
+    max_sections: int | None = None,
+    deadline: float | None = None,
+) -> list[dict]:
+    """Extract text SOPs by page, preserving short lines and mixed equipment codes.
+
+    No alarm/footer heuristics or OCR. A chunk never crosses a PDF page, so its
+    source page remains exact. Long lines are split to bound embedding inputs.
+    """
+    if chunk_size <= 0 or overlap < 0 or overlap >= chunk_size:
+        raise ValueError("chunk_size must be positive and overlap smaller than chunk_size")
+    sections: list[dict] = []
+    chars = lines = 0
+    with fitz.open(pdf_path) as doc:
+        for page_number, page in enumerate(doc, 1):
+            page_lines: list[str] = []
+            for raw in page.get_text().splitlines():
+                line = raw.strip()
+                if not line:
+                    continue
+                chars += len(line)
+                lines += 1
+                _check_extraction_budget(chars=chars, lines=lines, sections=len(sections),
+                    max_chars=max_chars, max_lines=max_lines, max_sections=max_sections, deadline=deadline)
+                page_lines.extend(line[i:i + 200] for i in range(0, len(line), 200))
+            start = 0
+            while start < len(page_lines):
+                # Character cap supplements line count for text-heavy PDFs.
+                end = start
+                length = 0
+                while end < min(start + chunk_size, len(page_lines)):
+                    next_length = length + len(page_lines[end]) + 1
+                    if next_length > 1600 and end > start:
+                        break
+                    length = next_length
+                    end += 1
+                window = page_lines[start:end]
+                sections.append({
+                    "code": "", "title": window[0][:120], "text": "\n".join(window),
+                    "page": page_number, "type": "general", "content_type": "procedure",
+                    "topic": "general", "parser": "text_v1", "chunk_index": len(sections),
+                })
+                _check_extraction_budget(chars=chars, lines=lines, sections=len(sections),
+                    max_chars=max_chars, max_lines=max_lines, max_sections=max_sections, deadline=deadline)
+                if end == len(page_lines):
+                    break
+                start = max(start + 1, end - min(overlap, (end - start) // 2))
+            # Check even blank/image-only pages against the time budget.
+            _check_extraction_budget(chars=chars, lines=lines, sections=len(sections),
+                max_chars=max_chars, max_lines=max_lines, max_sections=max_sections, deadline=deadline)
+    return sections
+
+
+def extract_document_sections(pdf_path: str, parser_name: str, *, chunk_size: int = 40,
+                              overlap: int = 8, include_general: bool = True, **budgets) -> list[dict]:
+    if parser_name == "text_v1":
+        if not include_general:
+            raise ValueError("--no-general cannot be used with the text_v1 SOP parser")
+        return extract_text_chunks(pdf_path, chunk_size, overlap, **budgets)
+    if parser_name != "sinumerik_alarm_v1":
+        raise ValueError(f"Unknown PDF parser: {parser_name}")
+    sections = extract_alarm_sections(pdf_path, **budgets)
+    if include_general:
+        sections += extract_general_chunks(pdf_path, chunk_size=chunk_size, overlap=overlap, **budgets)
+    return sections
+
+
 def build_index(sections: list[dict], collection_name: str):
     ensure_db_dir()
 
@@ -473,6 +549,9 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         args.name = validate_collection_name(args.name)
+        profile = collection_config(args.name)
+        if args.no_general and profile.parser == "text_v1":
+            raise ValueError("--no-general cannot be used with the text_v1 SOP parser")
     except ValueError as exc:
         print(f"ERROR: {exc}")
         return 1
@@ -500,23 +579,19 @@ def main(argv: list[str] | None = None) -> int:
         "kind": "pdf",
     }
 
-    # Always extract alarm sections
-    alarm_sections = extract_alarm_sections(args.pdf)
-    if not alarm_sections:
-        print("ERROR: No alarm codes found.")
+    doc_meta["parser"] = profile.parser
+    try:
+        sections = extract_document_sections(args.pdf, profile.parser, chunk_size=args.chunk_size,
+            overlap=args.chunk_overlap, include_general=not args.no_general)
+    except ValueError as exc:
+        print(f"ERROR: {exc}")
         return 1
-
-    # Optionally extract general content chunks
-    general_chunks = []
-    if not args.no_general:
-        print("\nExtracting general content (non-alarm chapters)...")
-        general_chunks = extract_general_chunks(
-            args.pdf,
-            chunk_size=args.chunk_size,
-            overlap=args.chunk_overlap,
-        )
-
-    all_sections = apply_doc_meta(alarm_sections + general_chunks, doc_meta)
+    if not sections:
+        print("ERROR: No content extracted from PDF; scanned PDFs require OCR, which is not supported.")
+        return 1
+    for section in sections:
+        section.update(parser=profile.parser, collection=args.name)
+    all_sections = apply_doc_meta(sections, doc_meta)
     print(f"\nTotal sections to index: {len(all_sections)}")
     build_index(all_sections, args.name)
 

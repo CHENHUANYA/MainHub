@@ -3,6 +3,7 @@
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+from services.company_config import CompanyConfig, NamedEntry, Line, Machine
 
 
 class ApiErrorResponse(BaseModel):
@@ -335,6 +336,7 @@ class KnowledgeReviewErrorResponse(ApiErrorResponse):
 
 
 class WorkOrderImportResponse(StatusOkResponse):
+    batch_id: str = ''
     filename: str
     imported: int
     skipped: int
@@ -343,9 +345,68 @@ class WorkOrderImportResponse(StatusOkResponse):
     feedback_count: int
 
 
+class WorkOrderImportPreviewRow(BaseModel):
+    row: int
+    values: dict[str, str]
+    warnings: list[str]
+    error: str
+
+
+class WorkOrderImportPreviewResponse(StatusOkResponse):
+    filename: str
+    valid: int
+    skipped: int
+    errors: list[str]
+    candidate_count: int
+    preview_token: str
+    rows: list[WorkOrderImportPreviewRow]
+
+
+class UserImportPreviewResponse(StatusOkResponse):
+    filename: str
+    valid: int
+    skipped: int
+    candidate_count: int
+    preview_token: str
+    rows: list[WorkOrderImportPreviewRow]
+
+
+class UserImportResponse(StatusOkResponse):
+    batch_id: str
+    filename: str
+    imported: int
+    skipped: int
+    candidate_count: int
+
+
+class ImportBatchResponse(BaseModel):
+    batch_id: str
+    kind: str
+    filename: str
+    file_sha256: str
+    actor: str
+    created_at: str
+    status: str
+    imported: int
+    skipped: int
+    error: str
+    rows: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ImportBatchListResponse(StatusOkResponse):
+    batches: list[ImportBatchResponse]
+    total: int
+    limit: int
+    offset: int
+
+
+class ImportBatchDetailResponse(StatusOkResponse):
+    batch: ImportBatchResponse
+
+
 class AlarmEntryResponse(BaseModel):
     alarm_code: str
-    manual: str = "808d"
+    manual: str = ""
     machine_id: str | None = ""
     line_id: str = ""
     source: str | None = ""
@@ -521,6 +582,35 @@ class SystemSettingsEnvelope(StatusOkResponse):
     settings: SystemSettingsResponse
 
 
+class CompanyCollectionResponse(NamedEntry):
+    ready: bool
+
+
+class CompanyDisplayResponse(StatusOkResponse):
+    company: NamedEntry
+    default_manual: str
+    collections: list[CompanyCollectionResponse]
+    sites: list[NamedEntry]
+    lines: list[Line]
+    machines: list[Machine]
+
+
+class CompanyPreviewState(BaseModel):
+    config: CompanyConfig
+    default_manual: str
+    allow_operator_reopen: bool
+
+
+class CompanyPreviewResponse(StatusOkResponse):
+    expected_revision: str
+    before: CompanyPreviewState
+    after: CompanyPreviewState
+
+
+class CompanyApplyResponse(StatusOkResponse):
+    revision: str
+
+
 class ActionNumberResponse(BaseModel):
     action_number: str
     reaction: str
@@ -685,10 +775,8 @@ class CollectionHealthResponse(BaseModel):
 
 
 class HealthResponse(StatusOkResponse):
-    llm_provider: str
+    llm_provider: Literal["ollama"]
     ollama_model: str
-    school_api_model: str
-    school_api_fallback_to_ollama: bool
     last_llm_source: str
     model_cache: dict[str, Any]
     collections: dict[str, CollectionHealthResponse]

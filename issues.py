@@ -6,6 +6,7 @@ future machine integration events. Maintenance work orders can be created from
 issues when escalation is needed.
 """
 
+from services.company_config import default_manual, resolve_manual
 import copy
 import json
 import logging
@@ -60,7 +61,7 @@ ISSUE_STALE_UPDATE_MESSAGE = "Issue changed since you loaded it. Reload and retr
 
 class CreateIssue(BaseModel):
     source: Optional[str] = "operator"
-    manual: Optional[str] = "808d"
+    manual: Optional[str] = None
     machine_id: str
     line_id: Optional[str] = ""
     alarm_code: Optional[str] = ""
@@ -246,7 +247,7 @@ def create_issue_dict(
     machine_id: str,
     description: str,
     source: str = "operator",
-    manual: str = "808d",
+    manual: str = "",
     line_id: str = "",
     alarm_code: str = "",
     severity: str = "medium",
@@ -260,7 +261,7 @@ def create_issue_dict(
     issue = {
         "issue_id": f"ISS-{datetime.now().strftime('%Y%m%d')}-{str(uuid.uuid4())[:6]}",
         "source": source or "operator",
-        "manual": manual or "808d",
+        "manual": manual or default_manual(),
         "machine_id": machine_id,
         "line_id": line_id,
         "alarm_code": alarm_code,
@@ -461,13 +462,20 @@ async def api_create_issue(req: CreateIssue, actor: dict = Depends(get_actor)):
             return {"status": "error", "message": "RAG answer not found"}
         if not can_reference_rag_answer(actor, answer):
             return {"status": "error", "message": "Permission denied"}
+    try:
+        req.manual, req.line_id = resolve_manual(req.manual, req.machine_id, req.line_id)
+    except ValueError as exc:
+        return {"status": "error", "message": str(exc)}
+    from auth import line_allowed
+    if req.line_id and not line_allowed(actor, req.line_id):
+        return {"status": "error", "message": "Permission denied"}
     created_by = actor_id(actor)
     if postgres_store_enabled():
         issue, work_order = postgres_create_issue(
             machine_id=req.machine_id,
             description=req.description,
             source=req.source or "operator",
-            manual=req.manual or "808d",
+            manual=req.manual or default_manual(),
             line_id=req.line_id or "",
             alarm_code=req.alarm_code or "",
             severity=req.severity or "medium",
@@ -482,7 +490,7 @@ async def api_create_issue(req: CreateIssue, actor: dict = Depends(get_actor)):
         machine_id=req.machine_id,
         description=req.description,
         source=req.source or "operator",
-        manual=req.manual or "808d",
+        manual=req.manual or default_manual(),
         line_id=req.line_id or "",
         alarm_code=req.alarm_code or "",
         severity=req.severity or "medium",
@@ -496,7 +504,7 @@ async def api_create_issue(req: CreateIssue, actor: dict = Depends(get_actor)):
     if req.create_work_order:
         work_order = create_order_dict(
             alarm_code=req.alarm_code or "SYMPTOM",
-            manual=req.manual or "808d",
+            manual=req.manual or default_manual(),
             machine_id=req.machine_id,
             priority=_priority_from_severity(issue["severity"]),
             description=req.description,
@@ -747,6 +755,20 @@ async def api_update_issue(issue_id: str, req: UpdateIssue, actor: dict = Depend
     if req.version is not None and req.version != current_version:
         return {"status": "error", "message": ISSUE_STALE_UPDATE_MESSAGE}
 
+    if any(getattr(req, field) is not None and getattr(req, field) != issue.get(field)
+           for field in ("machine_id", "line_id")):
+        from auth import line_allowed
+        try:
+            _, target_line = resolve_manual(
+                issue.get("manual"),
+                req.machine_id if req.machine_id is not None else issue.get("machine_id"),
+                req.line_id if req.line_id is not None else issue.get("line_id"),
+            )
+        except ValueError as exc:
+            return {"status": "error", "message": str(exc)}
+        if target_line and not line_allowed(actor, target_line):
+            return {"status": "error", "message": "Permission denied"}
+
     changed_fields = []
     updated_by = actor_id(actor)
     before_issue = copy.deepcopy(issue)
@@ -876,7 +898,7 @@ async def api_escalate_issue(issue_id: str, actor: dict = Depends(get_actor)):
 
     work_order = create_order_dict(
         alarm_code=issue.get("alarm_code") or "SYMPTOM",
-        manual=issue.get("manual") or "808d",
+        manual=issue.get("manual") or default_manual(),
         machine_id=issue.get("machine_id") or "",
         priority=_priority_from_severity(issue.get("severity") or "medium"),
         description=issue.get("description") or "",

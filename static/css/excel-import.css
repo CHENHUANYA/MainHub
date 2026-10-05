@@ -1,0 +1,22 @@
+.excel-result details { border-bottom: 1px solid var(--border, #d1d5db); padding: 10px 0; }
+.excel-result summary { cursor: pointer; overflow-wrap: anywhere; }
+.excel-result dl { display: grid; grid-template-columns: minmax(85px, 120px) minmax(0, 1fr); gap: 6px 12px; }
+.excel-result dt { font-weight: 600; }
+.excel-result dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.excel-result .wo-btn { margin: 12px 8px 0 0; }
+.role-row.import-batch { display: block; overflow-wrap: anywhere; }
+.import-batch summary { cursor: pointer; }
+.import-batch[open] summary { margin-bottom: 12px; }
+.import-batch p { margin: 6px 0; }
+.import-history-count { margin: 0; color: var(--text2, #64748b); font-size: 13px; }
+.role-row.import-batch { padding: 16px 18px; box-shadow: none; }
+.import-batch summary { font-size: 14px; }
+.import-batch-heading { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 10px; max-width: calc(100% - 24px); vertical-align: top; }
+.import-batch-heading strong { min-width: 0; font-weight: 600; }
+.import-batch-meta { display: block; margin: 8px 0 0 18px; color: var(--text2, #64748b); font-size: 12px; line-height: 1.7; }
+.import-batch-status { display: inline-block; padding: 2px 8px; border-radius: 6px; background: var(--surface2, #f1f5f9); font-size: 12px; white-space: nowrap; }
+.import-batch-status.is-complete { background: #edf5ef; color: #3c754d; }
+.import-batch > p, .import-batch > div { font-size: 13px; line-height: 1.8; }
+.import-history-pagination { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
+.import-history-pagination .wo-btn { width: auto; margin: 0; }
+.import-history-pagination .wo-btn:disabled { opacity: .45; cursor: default; }

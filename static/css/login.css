@@ -5,6 +5,10 @@
 *{margin:0;padding:0;box-sizing:border-box}
 html{scroll-behavior:smooth}
 body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh}
+body[data-page="login"]{
+  --login-font:"Microsoft JhengHei", "Microsoft JhengHei UI", "PingFang TC", "Noto Sans TC", "Segoe UI", sans-serif;
+  font-family:var(--login-font);
+}
 
 /* ─── Scrollbar ─── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -309,11 +313,16 @@ body[data-page="login"] .login-panel {
   gap: 6px;
 }
 
+.lg-description {
+  font: 400 13px/1.7 var(--login-font);
+  color: var(--text2);
+}
+
 .lg-label {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-family: var(--mono);
+  font-family: var(--login-font);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 1px;
@@ -331,7 +340,7 @@ body[data-page="login"] .login-panel {
   border: 1px solid var(--border2);
   border-radius: var(--r-md);
   padding: 12px 16px;
-  font-family: var(--mono);
+  font-family: var(--login-font);
   font-size: 14px;
   font-weight: 500;
   color: var(--text);
@@ -341,7 +350,7 @@ body[data-page="login"] .login-panel {
 
 .lg-input::placeholder {
   color: var(--dim);
-  font-family: var(--sans);
+  font-family: var(--login-font);
   font-weight: 400;
 }
 
@@ -367,7 +376,7 @@ body[data-page="login"] .login-panel {
   background: linear-gradient(135deg, var(--acc), var(--acc-dk));
   border: none;
   border-radius: var(--r-md);
-  font-family: var(--mono);
+  font-family: var(--login-font);
   font-size: 14px;
   font-weight: 700;
   letter-spacing: 1px;
@@ -532,8 +541,13 @@ body[data-page="login"] .upload-result.error {
   text-align: center;
   margin-top: 20px;
   font-size: 12px;
+  font-family: var(--login-font);
+  line-height: 1.7;
   color: var(--dim);
 }
+
+details.lg-hint summary { cursor: pointer; }
+details.lg-hint p { margin-top: 8px; text-align: left; color: var(--text2); }
 
 .lg-hint code {
   font-family: var(--mono);
@@ -565,3 +579,5 @@ body[data-page="login"] .upload-result.error {
     font-size: 17px;
   }
 }
+/* Keep form visibility explicit even when .lg-form sets display. */
+[hidden] { display: none !important; }

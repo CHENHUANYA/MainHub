@@ -580,6 +580,7 @@ header{
 .wo-btn.excel{background:linear-gradient(135deg,#16a34a,#15803d);color:#fff}
 .wo-btn.excel:hover{box-shadow:0 4px 14px rgba(22,163,74,0.4)}
 .wo-board{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;align-items:start}
+.maintenance-save-notice{margin:0 0 16px;padding:14px 16px;border:1px solid rgba(22,163,74,.2);border-radius:var(--r-md);background:var(--grn-bg);color:var(--grn);font-size:14px;line-height:1.7;overflow-wrap:anywhere;scroll-margin-top:140px}
 @media(max-width:1100px){.wo-board{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:780px){.wo-board{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:560px){.wo-board{grid-template-columns:1fr}}

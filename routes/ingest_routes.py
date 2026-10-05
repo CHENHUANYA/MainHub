@@ -33,6 +33,7 @@ from api_schemas import (
 )
 from auth import actor_id, actor_role, get_actor, is_admin
 from config_values import env_float, env_int
+from services.company_config import collection_config, validate_registered_collection
 from signed_pickle import load_signed_pickle
 from repositories.postgres_content import ConcurrentContentUpdateError
 from storage import (
@@ -188,6 +189,7 @@ def require_admin_or_supervisor(actor: dict) -> dict | None:
 def validate_collection_name(collection_name: str) -> str:
     if not is_safe_path_segment(collection_name):
         raise ValueError("Invalid collection name")
+    validate_registered_collection(collection_name)
     return collection_name
 
 
@@ -216,19 +218,13 @@ def ingest_pdf_file(collection_name: str, tmp_path: str, safe_filename: str, sou
         "kind": "pdf",
     }
 
-    from ingest import IngestBudgetExceeded, extract_alarm_sections, extract_general_chunks
+    from ingest import IngestBudgetExceeded, extract_document_sections
 
     deadline = time.monotonic() + PDF_MAX_PROCESS_SECONDS
     try:
-        alarm_sections = extract_alarm_sections(
-            tmp_path,
-            max_chars=PDF_MAX_EXTRACTED_CHARS,
-            max_lines=PDF_MAX_EXTRACTED_LINES,
-            max_sections=PDF_MAX_SECTIONS,
-            deadline=deadline,
-        )
-        general_chunks = extract_general_chunks(
-            tmp_path,
+        profile = collection_config(collection_name)
+        sections = extract_document_sections(
+            tmp_path, profile.parser,
             max_chars=PDF_MAX_EXTRACTED_CHARS,
             max_lines=PDF_MAX_EXTRACTED_LINES,
             max_sections=PDF_MAX_SECTIONS,
@@ -236,12 +232,19 @@ def ingest_pdf_file(collection_name: str, tmp_path: str, safe_filename: str, sou
         )
     except IngestBudgetExceeded:
         return {"status": "error", "message": "PDF processing budget exceeded"}
+    except ValueError as exc:
+        return {"status": "error", "message": str(exc)}
+    doc_meta["parser"] = profile.parser
+    for section in sections:
+        section.update(parser=profile.parser, collection=collection_name)
+    alarm_sections = [section for section in sections if section.get("code")]
+    general_chunks = [section for section in sections if not section.get("code")]
     all_sections = apply_doc_meta(alarm_sections + general_chunks, doc_meta)
     extracted_chars = sum(len(str(section.get("text") or "")) for section in all_sections)
     if len(all_sections) > PDF_MAX_SECTIONS or extracted_chars > PDF_MAX_EXTRACTED_CHARS:
         return {"status": "error", "message": "PDF processing budget exceeded"}
     if not all_sections:
-        return {"status": "error", "message": "No content extracted from PDF"}
+        return {"status": "error", "message": "No content extracted from PDF; scanned PDFs require OCR, which is not supported"}
 
     engine = get_engine(collection_name)
     try:

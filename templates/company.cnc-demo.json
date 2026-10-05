@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "company": {"id": "demo-cnc", "display_name": "CNC 示範工廠 A（模擬）"},
+  "default_collection": "cnc_manual",
+  "collections": [
+    {"id": "cnc_manual", "display_name": "CNC 示範手冊", "domain": "cnc", "parser": "sinumerik_alarm_v1", "prompt_profile": "cnc_maintenance_v1"}
+  ],
+  "sites": [{"id": "site-a", "display_name": "示範廠區 A"}],
+  "lines": [{"id": "line-a", "display_name": "加工一線", "site_id": "site-a"}],
+  "machines": [{"id": "CNC-01", "display_name": "示範 CNC 加工機", "model": "Demo CNC", "line_id": "line-a", "collection": "cnc_manual"}],
+  "workflow": {"allow_operator_reopen": false}
+}

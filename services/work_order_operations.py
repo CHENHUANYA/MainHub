@@ -57,6 +57,7 @@ def persist_update_and_sync_issue(
     use_postgres: bool,
     linked_issue_snapshot: dict | None,
     dependencies: OperationDependencies,
+    sync_linked_issue: bool = True,
 ) -> UpdatePersistenceResult:
     if use_postgres:
         order = dependencies.save_one(order)
@@ -65,7 +66,7 @@ def persist_update_and_sync_issue(
         dependencies.save_all(orders)
 
     synced_issue = None
-    if order.get("issue_id"):
+    if sync_linked_issue and order.get("issue_id"):
         try:
             synced_issue = dependencies.sync_issue(order)
             if synced_issue is None:

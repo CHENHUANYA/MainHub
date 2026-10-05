@@ -1,5 +1,6 @@
 ﻿(() => {
-  document.addEventListener('DOMContentLoaded', () => {
+  document.addEventListener('DOMContentLoaded', async () => {
+  if (!await window.AlarmApp?.loadCompanyConfig()) return;
     const app = window.AlarmApp;
     if (!app) {
       return;
@@ -53,7 +54,7 @@ function renderAlarmTable() {
       '<td class="u-mono u-text-small u-text-muted u-nowrap">' +
         app.esc(item.date || '') + ' ' + app.esc(item.time || '') +
       '</td>' +
-      '<td class="alarm-code-cell" data-on-click="lookupAlarm" data-action-args="[' + app.toJsArg(item.code) + ',' + app.toJsArg(item.manual || '808d') + ']">' +
+      '<td class="alarm-code-cell" data-on-click="lookupAlarm" data-action-args="[' + app.toJsArg(item.code) + ',' + app.toJsArg(item.manual || window.AlarmApp.getState('defaultManual')) + ']">' +
         app.esc(item.code) +
       '</td>' +
       '<td><span class="model-pill">' + app.esc(manual || '808D') + '</span></td>' +
@@ -213,7 +214,8 @@ async function updateKPIsFromServer() {
 }
 
 // Run on load
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', async function() {
+  if (!await window.AlarmApp?.loadCompanyConfig()) return;
   // Let the standard init run first, then enhance
   setTimeout(function() {
     renderAlarmTable();

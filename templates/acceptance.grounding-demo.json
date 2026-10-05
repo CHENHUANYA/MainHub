@@ -1,0 +1,152 @@
+{
+  "schema_version": 1,
+  "scenario": "grounding",
+  "company_id": "demo-compressor",
+  "collection": "compressor_demo",
+  "scope": "MOCK DATA: regression for unrelated-page answers; not equipment operating instructions",
+  "documents": [
+    {
+      "filename": "MOCK-compressor.pdf",
+      "pages": [
+        "MOCK DATA - training only\nAIR-01 / E-42\nRecord the gauge reading.\nReport to maintenance.",
+        "MOCK DATA\nOffice lighting\nUnrelated demonstration content.",
+        "MOCK DATA\nTraining attendance\nUnrelated demonstration content."
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "id": "gauge-original",
+      "kind": "supported",
+      "question": "In the source PDF MOCK-compressor.pdf, what does the training observation say about the gauge reading and reporting to maintenance?",
+      "source_file": "MOCK-compressor.pdf",
+      "page": 1,
+      "facts_any": [
+        [
+          "gauge",
+          "儀表",
+          "壓力表"
+        ],
+        [
+          "maintenance",
+          "維修",
+          "維護"
+        ]
+      ],
+      "expected": "Record the gauge reading and report to maintenance, citing page 1; do not answer with training attendance from page 3.",
+      "answer_contract": "excerpt_zh",
+      "required_quotes": [
+        "Record the gauge reading.",
+        "Report to maintenance."
+      ],
+      "zh_facts_any": [
+        [
+          "記錄",
+          "紀錄"
+        ],
+        [
+          "儀表",
+          "壓力表",
+          "量表"
+        ],
+        [
+          "通報",
+          "報告",
+          "回報"
+        ],
+        [
+          "維修",
+          "維護"
+        ]
+      ]
+    },
+    {
+      "id": "gauge-zh",
+      "kind": "supported",
+      "question": "根據 MOCK-compressor.pdf，AIR-01／E-42 的訓練觀察應記錄什麼，並向誰通報？",
+      "source_file": "MOCK-compressor.pdf",
+      "page": 1,
+      "facts_any": [
+        [
+          "gauge",
+          "儀表",
+          "壓力表"
+        ],
+        [
+          "maintenance",
+          "維修",
+          "維護"
+        ]
+      ],
+      "expected": "僅依第 1 頁記錄儀表讀值並通報維修，保留 MOCK 訓練標示。",
+      "answer_contract": "excerpt_zh",
+      "required_quotes": [
+        "Record the gauge reading.",
+        "Report to maintenance."
+      ],
+      "zh_facts_any": [
+        [
+          "記錄",
+          "紀錄"
+        ],
+        [
+          "儀表",
+          "壓力表",
+          "量表"
+        ],
+        [
+          "通報",
+          "報告",
+          "回報"
+        ],
+        [
+          "維修",
+          "維護"
+        ]
+      ]
+    },
+    {
+      "id": "gauge-missing-parameter",
+      "kind": "insufficient",
+      "question": "AIR-01 的安全壓力上限是多少 bar？",
+      "forbidden_patterns": [
+        "\\d+(?:\\.\\d+)?\\s*(?:bar|MPa|psi|巴)"
+      ],
+      "expected": "文件没有壓力上限，不得用記錄讀值代替上限或杜撰數字。",
+      "answer_contract": "insufficient_zh",
+      "missing_document_terms": [
+        [
+          "壓力"
+        ]
+      ]
+    },
+    {
+      "id": "gauge-missing-code",
+      "kind": "insufficient",
+      "question": "AIR-01 的 E-99 原因與處理方式是什麼？",
+      "expected": "文件沒有 E-99，不借用 E-42 的步驟。",
+      "answer_contract": "insufficient_zh",
+      "missing_document_terms": [
+        [
+          "設備",
+          "代碼",
+          "警報"
+        ]
+      ]
+    },
+    {
+      "id": "gauge-other-equipment",
+      "kind": "insufficient",
+      "question": "CNC-01 警報 3101 的原因與處理方式是什麼？",
+      "expected": "文件不包含 CNC-01／3101，不借用空壓機的訓練處置。",
+      "answer_contract": "insufficient_zh",
+      "missing_document_terms": [
+        [
+          "設備",
+          "代碼",
+          "警報"
+        ]
+      ]
+    }
+  ]
+}

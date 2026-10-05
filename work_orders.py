@@ -8,6 +8,11 @@ Features
 - Admin approval ingests reviewed notes into the RAG knowledge base.
 """
 
+from services.company_config import default_manual, resolve_manual, runtime_settings
+import hashlib
+from dataclasses import replace
+import hmac
+from itertools import islice
 import copy
 import json
 import logging
@@ -18,9 +23,9 @@ import uuid
 import asyncio
 import threading
 from datetime import datetime
-from typing import List, Optional, Tuple
+from typing import Annotated, List, Optional, Tuple
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
@@ -32,6 +37,7 @@ from api_schemas import (
     WorkOrderDeleteResponse,
     WorkOrderHistoryResponse,
     WorkOrderImportResponse,
+    WorkOrderImportPreviewResponse,
     WorkOrderMutationResponse,
     WorkOrderStatsResponse,
     WorkOrderSuccessResponse,
@@ -43,6 +49,7 @@ from auth import (
     actor_id,
     actor_role,
     can_reference_rag_answer,
+    can_revise_work_order_knowledge,
     can_update_work_order,
     can_view_issue,
     can_view_work_order,
@@ -69,6 +76,7 @@ from services.work_order_import import (
     XlsxArchiveLimits,
     detect_columns,
     import_workbook_rows,
+    row_fields,
     validate_xlsx_archive,
 )
 
@@ -119,6 +127,7 @@ MAINTENANCE_WORK_ORDER_PATCH_FIELDS = {
     "version",
 }
 LIFECYCLE_IDENTITY_FIELDS = {"accepted_by", "completed_by", "verified_by", "updated_by"}
+KNOWLEDGE_REVISION_FIELDS = {"root_cause", "repair_action", "resolution", "notes", "version"}
 _archive_scan_lock = threading.Lock()
 _archive_active_total = 0
 _archive_active_by_actor: dict[str, int] = {}
@@ -394,7 +403,7 @@ def _load_archived_orders() -> Tuple[List[dict], List[dict]]:
 # ----------------- Models -----------------
 class CreateWorkOrder(BaseModel):
     alarm_code: str = Field(min_length=1, max_length=128)
-    manual: Optional[str] = Field(default="808d", max_length=64)
+    manual: Optional[str] = Field(default=None, max_length=64)
     issue_id: Optional[str] = Field(default="", max_length=128)
     machine_id: Optional[str] = Field(default="", max_length=255)
     priority: Optional[str] = Field(default="medium", max_length=32)
@@ -438,7 +447,7 @@ class KnowledgeReviewRequest(BaseModel):
 
 def _build_order_dict(
     alarm_code: str,
-    manual: str = "808d",
+    manual: str = "",
     machine_id: str = "",
     priority: str = "medium",
     description: str = "",
@@ -456,7 +465,7 @@ def _build_order_dict(
         "id": str(uuid.uuid4())[:8],
         "issue_id": issue_id,
         "alarm_code": alarm_code,
-        "manual": manual,
+        "manual": manual or default_manual(),
         "machine_id": machine_id,
         "status": initial_status,
         "priority": priority,
@@ -518,7 +527,7 @@ def _persist_new_order(order: dict) -> dict:
 # ----------------- Public helper -----------------
 def create_order_dict(
     alarm_code: str,
-    manual: str = "808d",
+    manual: str = "",
     machine_id: str = "",
     priority: str = "medium",
     description: str = "",
@@ -636,9 +645,21 @@ async def api_create_order(req: CreateWorkOrder, actor: dict = Depends(get_actor
         )
         if not inherited_from_visible_issue and not can_reference_rag_answer(actor, answer):
             return {"status": "error", "message": "Permission denied"}
+    try:
+        machine_id = req.machine_id or str((linked_issue or {}).get("machine_id") or "")
+        manual_name, line_id = resolve_manual(
+            req.manual or (linked_issue or {}).get("manual"), machine_id,
+            (linked_issue or {}).get("line_id"),
+        )
+    except ValueError as exc:
+        return {"status": "error", "message": str(exc)}
+    from auth import line_allowed
+    if line_id and not line_allowed(actor, line_id):
+        return {"status": "error", "message": "Permission denied"}
+    req.manual, req.machine_id = manual_name, machine_id
     order = create_order_dict(
         alarm_code=req.alarm_code,
-        manual=req.manual or "808d",
+        manual=req.manual or default_manual(),
         issue_id=req.issue_id or "",
         machine_id=req.machine_id or "",
         priority=req.priority or "medium",
@@ -849,6 +870,18 @@ async def api_update_order(order_id: str, req: UpdateWorkOrder, actor: dict = De
         return {"status": "error", "message": "Permission denied"}
     if not can_update_work_order(actor, order, req.status):
         return {"status": "error", "message": "Permission denied"}
+    knowledge_revision = can_revise_work_order_knowledge(actor, order)
+    if knowledge_revision:
+        if not _request_fields(req) <= KNOWLEDGE_REVISION_FIELDS:
+            return {"status": "error", "message": "退回補充僅能修改根本原因、實際維修動作、處理結果與備註。"}
+        if req.version is None:
+            return {"status": "error", "message": WORK_ORDER_STALE_UPDATE_MESSAGE}
+        if not all(str(getattr(req, field) if getattr(req, field) is not None else order.get(field) or "").strip()
+                   for field in ("root_cause", "repair_action", "resolution")):
+            return {"status": "error", "message": "重新送審前，請填寫根本原因、實際維修動作與處理結果。"}
+        if not any(getattr(req, field) is not None and getattr(req, field) != order.get(field, "")
+                   for field in KNOWLEDGE_REVISION_FIELDS - {"version"}):
+            return {"status": "error", "message": "請先依審核備註補充內容，再重新送審。"}
     field_permission_error = _work_order_patch_permission_error(actor, req)
     if field_permission_error:
         return {"status": "error", "message": field_permission_error}
@@ -865,11 +898,21 @@ async def api_update_order(order_id: str, req: UpdateWorkOrder, actor: dict = De
             and req.status == "verified"
             and _request_fields(req) <= {"status", "version"}
         )
-        if not exact_verification:
+        if not exact_verification and not knowledge_revision:
             return {"status": "error", "message": "Terminal work orders are immutable for this role"}
     current_version = work_order_mutations.normalized_version(order)
     if req.version is not None and req.version != current_version:
         return {"status": "error", "message": WORK_ORDER_STALE_UPDATE_MESSAGE}
+
+    if req.machine_id is not None and req.machine_id != order.get("machine_id"):
+        from auth import line_allowed
+        try:
+            _, target_line = resolve_manual(order.get("manual"), req.machine_id,
+                linked_issue.get("line_id") if linked_issue else None)
+        except ValueError as exc:
+            return {"status": "error", "message": str(exc)}
+        if target_line and not line_allowed(actor, target_line):
+            return {"status": "error", "message": "Permission denied"}
 
     now = datetime.now().isoformat()
     linked_issue_snapshot = copy.deepcopy(linked_issue) if linked_issue is not None else None
@@ -883,7 +926,8 @@ async def api_update_order(order_id: str, req: UpdateWorkOrder, actor: dict = De
         stale_message=WORK_ORDER_STALE_UPDATE_MESSAGE,
         status_transition_error=_status_transition_error,
         closure_error=_closure_error,
-        direct_verification_error=_direct_verification_error,
+        # The narrow revision path cannot submit status or lifecycle identities.
+        direct_verification_error=(lambda _order, _actor: "") if knowledge_revision else _direct_verification_error,
         refresh_knowledge_state=_refresh_knowledge_review_state,
         load_duplicate_orders=_load_orders,
         find_duplicate_order=_find_duplicate_knowledge_order,
@@ -903,6 +947,7 @@ async def api_update_order(order_id: str, req: UpdateWorkOrder, actor: dict = De
         use_postgres=use_postgres,
         linked_issue_snapshot=linked_issue_snapshot,
         dependencies=operation_dependencies,
+        sync_linked_issue=not knowledge_revision,
     )
     if persisted.error:
         return {"status": "error", "message": persisted.error}
@@ -956,7 +1001,7 @@ async def _auto_feedback_to_kb(order: dict) -> dict:
     if order.get("notes"):
         text += f"備註: {order['notes']}\n"
 
-    manual = order.get("manual", "808d")
+    manual = order.get("manual") or default_manual()
     payload = {
         "text": text,
         "code": order.get("alarm_code", ""),
@@ -1067,6 +1112,7 @@ EXCEL_FIELD_MAP = {
     "根本原因": "root_cause", "root_cause": "root_cause",
     "實際維修動作": "repair_action", "repair_action": "repair_action",
     "驗證人員": "verified_by", "verified_by": "verified_by",
+    "來源紀錄ID": "source_record_id", "source_record_id": "source_record_id",
 }
 POSITIONAL_FIELDS = [
     "alarm_code",
@@ -1104,7 +1150,22 @@ def _validate_xlsx_archive(content: bytes) -> str:
     "/work-orders/import-excel",
     responses={200: {"model": WorkOrderImportResponse}, **API_ERROR_RESPONSES},
 )
-async def import_excel(file: UploadFile = File(...), actor: dict = Depends(get_actor)):
+async def import_excel(
+    file: UploadFile = File(...), actor: dict = Depends(get_actor),
+    preview_token: Annotated[str | None, Form(max_length=64)] = None,
+):
+    return await _handle_excel(file, actor, preview_token=preview_token)
+
+
+@router.post(
+    "/work-orders/import-excel/preview",
+    responses={200: {"model": WorkOrderImportPreviewResponse}, **API_ERROR_RESPONSES},
+)
+async def preview_excel(file: UploadFile = File(...), actor: dict = Depends(get_actor)):
+    return await _handle_excel(file, actor, preview_only=True)
+
+
+async def _handle_excel(file, actor: dict, *, preview_only: bool = False, preview_token: str | None = None):
     if not actor_id(actor):
         return {"status": "error", "message": "Not authenticated"}
     if not is_admin(actor):
@@ -1144,20 +1205,51 @@ async def import_excel(file: UploadFile = File(...), actor: dict = Depends(get_a
         wb = load_workbook(tmp_path, read_only=True, data_only=True)
         ws = wb.active
 
-        rows = list(ws.iter_rows(values_only=True))
+        if ws.max_column and ws.max_column > 32:
+            return {"status": "error", "message": "Excel import supports at most 32 columns"}
+        rows = list(islice(ws.iter_rows(values_only=True, max_col=32), 1002))
+        if len(rows) > 1001:
+            return {"status": "error", "message": "Excel import supports at most 1000 data rows"}
         if not rows:
             return {"status": "error", "message": "Excel 檔案為空"}
 
-        summary = await _persist_import_rows(rows, actor_id(actor))
+        file_digest = hashlib.sha256(content).hexdigest()
+        if preview_only:
+            settings = runtime_settings()
+            existing = _load_orders()
+            accounts = _import_accounts(rows)
+            summary, _ = _prepare_import_rows(rows, actor_id(actor), settings, existing, accounts, file_digest)
+            return {
+                "status": "ok", "filename": safe_filename,
+                "valid": summary.imported, "skipped": summary.skipped,
+                "errors": summary.errors, "rows": summary.rows,
+                "candidate_count": summary.candidate_count,
+                "preview_token": _import_token(file_digest, actor_id(actor), settings, existing, accounts),
+            }
+        if not preview_token:
+            return {"status": "error", "message": "Preview the Excel file before confirming import"}
+        try:
+            summary = await _confirm_import_rows(rows, actor_id(actor), file_digest, preview_token, safe_filename)
+        except Exception as exc:
+            if postgres_store_enabled():
+                from services.import_batches import record_batch
+                try:
+                    record_batch(kind='work_orders', filename=safe_filename, digest=file_digest, actor=actor_id(actor),
+                                 rows=[], imported=0, skipped=0, status='failed',
+                                 error=str(exc) if isinstance(exc, ValueError) else 'Storage error; batch rolled back')
+                except Exception:
+                    logger.warning('Unable to record failed work-order import')
+            raise
 
         return {
             "status": "ok",
             "filename": safe_filename,
             "imported": summary.imported,
             "skipped": summary.skipped,
-            "errors": summary.errors[:10],
+            "errors": summary.errors,
             "candidate_count": summary.candidate_count,
             "feedback_count": 0,
+            "batch_id": summary.batch_id,
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
@@ -1170,10 +1262,26 @@ async def import_excel(file: UploadFile = File(...), actor: dict = Depends(get_a
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
-@postgres_transactional
-@json_transactional(lambda: DB_DIR)
-async def _persist_import_rows(rows: list, importer_id: str):
-    return import_workbook_rows(
+def _import_accounts(rows: list, *, lock: bool = False) -> dict[str, dict]:
+    columns = detect_columns(rows[0], EXCEL_FIELD_MAP)
+    mapping = columns or dict(enumerate(POSITIONAL_FIELDS))
+    ids = {row_fields(row, mapping).get("assigned_to", "") for row in (rows[1:] if columns else rows)}
+    if lock and postgres_store_enabled() and ids - {""}:
+        from db.models import User
+        from db.session import session_scope
+        from sqlalchemy import select
+        with session_scope() as session:
+            # Keep referenced accounts valid until the surrounding transaction commits.
+            session.execute(select(User).where(User.user_id.in_(sorted(ids - {""})))
+                            .order_by(User.user_id).with_for_update()).all()
+    return {key: {field: user.get(field) for field in ("user_id", "active", "role")}
+            for key in sorted(ids - {""}) for user in [resolve_user(key)]}
+
+
+def _prepare_import_rows(rows: list, importer_id: str, settings: dict,
+                         existing: list[dict], accounts: dict[str, dict], file_digest: str):
+    orders: list[dict] = []
+    summary = import_workbook_rows(
         rows,
         field_map=EXCEL_FIELD_MAP,
         positional_fields=POSITIONAL_FIELDS,
@@ -1185,5 +1293,55 @@ async def _persist_import_rows(rows: list, importer_id: str):
         refresh_knowledge_state=_refresh_knowledge_review_state,
         append_order_history=_append_order_history,
         calculate_field_changes=field_changes,
-        persist_order=_persist_new_order,
+        persist_order=orders.append,
+        settings=settings,
+        accounts=accounts,
+        existing_keys={order["import_key"]: order["id"] for order in existing if order.get("import_key")},
+        file_digest=file_digest,
     )
+    return summary, orders
+
+
+def _import_token(file_digest: str, importer_id: str, settings: dict, orders: list[dict], accounts: dict) -> str:
+    # An optimistic confirmation fingerprint, not an authentication credential.
+    payload = {
+        "version": 2, "file": file_digest, "actor": importer_id, "settings": settings, "accounts": accounts,
+        "orders": sorted((str(order["id"]), order.get("version", 1), order.get("updated_at", ""))
+                         for order in orders),
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+@postgres_transactional
+@json_transactional(lambda: DB_DIR)
+async def _confirm_import_rows(rows: list, importer_id: str, file_digest: str, preview_token: str, filename: str = ''):
+    if postgres_store_enabled():
+        from db.session import session_scope
+        from sqlalchemy import text
+        with session_scope() as session:
+            # Share the settings lock and serialize simultaneous Excel confirmations.
+            if session.get_bind().dialect.name == 'postgresql':
+                session.execute(text("SELECT pg_advisory_xact_lock(684720260921)"))
+                session.execute(text("SELECT pg_advisory_xact_lock(684720260923)"))
+    settings = runtime_settings()
+    existing = _load_orders()
+    accounts = _import_accounts(rows, lock=True)
+    expected = _import_token(file_digest, importer_id, settings, existing, accounts)
+    if not hmac.compare_digest(preview_token, expected):
+        raise ValueError("File, accounts, company settings or work orders changed. Preview again before importing.")
+    summary, orders = _prepare_import_rows(rows, importer_id, settings, existing, accounts, file_digest)
+    if not orders:
+        raise ValueError("No valid work orders to import; correct the preview errors first")
+    if postgres_store_enabled():
+        for order in orders:
+            postgres_work_orders.save_one(order)
+        from services.import_batches import record_batch
+        by_row = {order['import_metadata']['row']: order['id'] for order in orders}
+        ledger_rows = [{**row, 'record_id': by_row.get(row['row'], '')} for row in summary.rows]
+        batch = record_batch(kind='work_orders', filename=filename, digest=file_digest, actor=importer_id,
+                             rows=ledger_rows, imported=summary.imported, skipped=summary.skipped)
+        summary = replace(summary, batch_id=batch['batch_id'])
+    else:
+        # Publish the valid batch once. A disk failure cannot leave half a batch.
+        _save_orders(list(reversed(orders)) + existing)
+    return summary

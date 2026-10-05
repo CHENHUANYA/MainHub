@@ -8,6 +8,9 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 ROOT = SCRIPT_DIR.parent
+sys.path.insert(0, str(SCRIPT_DIR))
+
+from preflight_check import automation_enabled
 
 
 @dataclass
@@ -31,6 +34,8 @@ def python_cmd(script: str, *args: str) -> list[str]:
 
 def build_steps(args: argparse.Namespace) -> list[Step]:
     preflight_args = ["--require-model-cache"] if args.require_model_cache else []
+    preflight_args.append("--require-ollama-model")
+    automation = getattr(args, "with_automation", False) or automation_enabled()
     acceptance_args = [
         "--base-url",
         args.base_url,
@@ -47,10 +52,17 @@ def build_steps(args: argparse.Namespace) -> list[Step]:
         acceptance_args.extend(["--pdf", args.pdf, "--pdf-max-mb", str(args.pdf_max_mb)])
     if args.create_backup:
         acceptance_args.append("--create-backup")
+    for forwarded in (preflight_args, acceptance_args):
+        if automation:
+            forwarded.append("--with-automation")
+        if getattr(args, "ollama_url", ""):
+            forwarded.extend(["--ollama-url", args.ollama_url])
+    backup_components = args.backup_components or (
+        "alarm_db,data,qdrant_data,n8n_data" if automation else "alarm_db,data,qdrant_data"
+    )
 
     steps = [
         Step("preflight", python_cmd("preflight_check.py", *preflight_args)),
-        Step("n8n-workflow", python_cmd("n8n_workflow_check.py")),
         Step("standalone-acceptance", python_cmd("standalone_acceptance.py", *acceptance_args)),
         Step("ui-evidence", python_cmd("ui_evidence_check.py", "--report", args.ui_report, "--screenshots", args.ui_screenshots)),
         Step(
@@ -61,11 +73,13 @@ def build_steps(args: argparse.Namespace) -> list[Step]:
                 "--max-age-hours",
                 str(args.backup_max_age_hours),
                 "--require-components",
-                args.backup_components,
+                backup_components,
                 "--verify",
             ),
         ),
     ]
+    if automation:
+        steps.insert(1, Step("n8n-workflow", python_cmd("n8n_workflow_check.py")))
     if args.restore_smoke:
         steps.append(Step("restore-smoke", python_cmd("data_maintenance.py", "restore-smoke", "--cleanup")))
     return steps
@@ -126,6 +140,8 @@ def print_summary(results: list[StepResult], restore_smoke: bool) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run local reliability validation checks for handoff screenshots")
     parser.add_argument("--base-url", default="http://localhost:8100")
+    parser.add_argument("--with-automation", action="store_true", help="include optional n8n checks and backup state")
+    parser.add_argument("--ollama-url", default="", help="Ollama URL reachable from this check process")
     parser.add_argument("--manual", default="808d")
     parser.add_argument("--alarm-code", default="3000")
     parser.add_argument("--timeout", type=int, default=180)
@@ -139,7 +155,7 @@ def main() -> int:
     parser.add_argument("--ui-report", default=str(ROOT / "tests_tmp" / "browser_e2e" / "browser_e2e_report.json"))
     parser.add_argument("--ui-screenshots", default=str(ROOT / "tests_tmp" / "browser_e2e" / "screenshots"))
     parser.add_argument("--backup-max-age-hours", type=float, default=72.0)
-    parser.add_argument("--backup-components", default="alarm_db,data,n8n_data,qdrant_data")
+    parser.add_argument("--backup-components", default="", help="override required backup components; n8n is optional by default")
     parser.add_argument("--verbose", action="store_true", help="print full child command output")
     args = parser.parse_args()
 

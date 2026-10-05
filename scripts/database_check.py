@@ -12,6 +12,7 @@ from db.session import database_status, get_engine
 
 
 REQUIRED_TABLES = {
+    "import_batches",
     "users",
     "sessions",
     "login_throttles",
@@ -27,6 +28,7 @@ REQUIRED_TABLES = {
     "system_settings",
 }
 REQUIRED_INDEXES = {
+    "import_batches": {"ix_import_batches_created_at"},
     "sessions": {"ix_sessions_user_expires"},
     "login_throttles": {
         "ix_login_throttles_updated_at",

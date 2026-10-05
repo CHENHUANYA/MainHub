@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import zipfile
-from dataclasses import dataclass
+import hashlib
+import json
+from dataclasses import dataclass, field
 from datetime import datetime
 from io import BytesIO
 from typing import Any, Callable, Iterable, Mapping, Sequence
+from services.company_config import resolve_manual
 
 
 @dataclass(frozen=True)
@@ -21,6 +24,23 @@ class ImportSummary:
     skipped: int
     errors: list[str]
     candidate_count: int
+    rows: list[dict] = field(default_factory=list)
+    batch_id: str = ''
+
+
+IMPORT_FIELDS = (
+    "alarm_code", "machine_id", "manual", "priority", "status", "assigned_to",
+    "description", "resolution", "notes", "root_cause", "repair_action", "source",
+)
+
+
+def import_key(values: Mapping[str, str], source_record_id: str = "") -> str:
+    # A stable source ID distinguishes separate incidents with identical text.
+    # Without one, deduplicate the normalized imported content, never runtime IDs.
+    identity = ({"source": values["source"], "source_record_id": source_record_id}
+                if source_record_id else dict(values))
+    payload = json.dumps(identity, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def detect_columns(header_row: Sequence[Any], field_map: Mapping[str, str]) -> dict[int, str] | None:
@@ -86,6 +106,10 @@ def import_workbook_rows(
     append_order_history: Callable[..., None],
     calculate_field_changes: Callable[[dict, dict, list[str]], Any],
     persist_order: Callable[[dict], Any],
+    settings: dict | None = None,
+    accounts: Mapping[str, dict] | None = None,
+    existing_keys: Mapping[str, str] | None = None,
+    file_digest: str = "",
     now: Callable[[], datetime] = datetime.now,
 ) -> ImportSummary:
     """Convert workbook rows into work orders without depending on FastAPI or storage implementations."""
@@ -93,16 +117,28 @@ def import_workbook_rows(
     has_header = detected_columns is not None
     column_map = detected_columns or {index: field for index, field in enumerate(positional_fields)}
     data_rows = rows[1:] if has_header else rows
+    if len(data_rows) > 1000:
+        raise ValueError("Excel import supports at most 1000 data rows")
     valid_priorities = set(priorities)
     valid_statuses = set(statuses)
     imported = 0
     skipped = 0
     errors: list[str] = []
     candidate_count = 0
+    preview_rows: list[dict] = []
+    seen = dict(existing_keys or {})
+    if has_header and ("alarm_code" not in column_map.values() or
+                       len(set(column_map.values())) != len(column_map)):
+        raise ValueError("Header requires alarm_code and must not contain duplicate fields")
 
     for row_index, row in enumerate(data_rows, start=2 if has_header else 1):
+        if not any(cell is not None and str(cell).strip() for cell in row):
+            continue
+        preview: dict[str, Any] = {"row": row_index, "values": {}, "warnings": [], "error": ""}
+        preview_rows.append(preview)
         try:
             fields = row_fields(row, column_map)
+            preview["values"] = fields
             field_limits = {
                 "alarm_code": 128,
                 "manual": 64,
@@ -117,54 +153,63 @@ def import_workbook_rows(
                 "root_cause": 10_000,
                 "repair_action": 10_000,
                 "verified_by": 128,
+                "source_record_id": 255,
             }
             oversized = [name for name, value in fields.items() if len(value) > field_limits.get(name, 10_000)]
             if oversized:
-                errors.append(f"Row {row_index}: fields exceed size limits: {', '.join(sorted(oversized))}")
-                skipped += 1
-                continue
+                raise ValueError(f"fields exceed size limits: {', '.join(sorted(oversized))}")
             alarm_code = fields.get("alarm_code", "").strip()
             if not alarm_code:
-                skipped += 1
-                continue
+                raise ValueError("alarm_code is required")
 
-            priority = fields.get("priority", "medium").lower()
+            priority = (fields.get("priority") or "medium").lower()
             if priority not in valid_priorities:
-                priority = "medium"
-            status = fields.get("status", "pending").lower()
+                raise ValueError(f"Unknown priority: {priority}")
+            status = (fields.get("status") or "pending").lower()
             if status not in valid_statuses:
-                status = "pending"
+                raise ValueError(f"Unknown status: {status}")
             if status == "verified":
                 # Imported files are historical input, not proof that the
                 # authenticated verifier workflow took place.
                 status = "completed"
+                preview["warnings"].append("verified becomes completed; authenticated verification is still required")
+            if fields.get("verified_by"):
+                preview["warnings"].append("verified_by is ignored; spreadsheet values cannot verify a work order")
 
+            manual, _ = resolve_manual(fields.get("manual"), fields.get("machine_id"), settings=settings)
+            assignee = fields.get("assigned_to", "")
+            if assignee:
+                user = (accounts or {}).get(assignee, {})
+                if not user.get("user_id"):
+                    raise ValueError(f"Unknown assigned_to account: {assignee}; use the account ID")
+                if not user.get("active", True):
+                    raise ValueError(f"Inactive assigned_to account: {assignee}")
+                if user.get("role") != "maintenance":
+                    raise ValueError(f"assigned_to must be a maintenance account: {assignee}")
             order = build_order(
                 alarm_code=alarm_code,
-                manual=fields.get("manual", "808d"),
+                manual=manual,
                 machine_id=fields.get("machine_id", ""),
                 priority=priority,
                 description=fields.get("description", ""),
                 rag_suggestion="",
-                source=fields.get("source", "excel"),
-                assigned_to=fields.get("assigned_to", ""),
+                source=fields.get("source") or "excel",
+                assigned_to=assignee,
                 created_by=created_by,
             )
             knowledge_candidate = False
+            before_order = dict(order)
+            for field_name in ("resolution", "notes", "root_cause", "repair_action"):
+                if fields.get(field_name):
+                    order[field_name] = fields[field_name]
 
             if status != "pending":
-                before_order = dict(order)
                 previous_status = order.get("status", "pending")
                 order["status"] = status
                 changed_fields = ["status", "resolution", "notes", "root_cause", "repair_action"]
-                for field_name in changed_fields[1:]:
-                    if fields.get(field_name):
-                        order[field_name] = fields[field_name]
                 validation_error = closure_error(order)
                 if validation_error:
-                    errors.append(f"Row {row_index}: {validation_error}")
-                    skipped += 1
-                    continue
+                    raise ValueError(validation_error)
                 if status in {"completed", "verified"}:
                     order["completed_at"] = order.get("completed_at") or now().isoformat()
                     order["completed_by"] = created_by
@@ -184,16 +229,33 @@ def import_workbook_rows(
                     calculate_field_changes(before_order, order, changed_fields),
                 )
 
+            preview["values"] = {key: order.get(key, "") for key in IMPORT_FIELDS}
+            source_id = fields.get("source_record_id", "")
+            key = import_key(preview["values"], source_id)
+            if source_id:
+                preview["values"]["source_record_id"] = source_id
+            if key in seen:
+                raise ValueError(f"Duplicate import record: {seen[key]}")
+            order["import_key"] = key
+            order["import_metadata"] = {
+                "version": 1, "file_sha256": file_digest, "row": row_index,
+                "source_record_id": source_id, "imported_by": created_by,
+            }
             persist_order(order)
+            seen[key] = f"row {row_index}"
             if knowledge_candidate:
                 candidate_count += 1
             imported += 1
         except Exception as exc:
+            preview["values"] = {key: str(value)[:1000] for key, value in preview["values"].items()}
+            preview["error"] = str(exc)
             errors.append(f"Row {row_index}: {exc}")
+            skipped += 1
 
     return ImportSummary(
         imported=imported,
         skipped=skipped,
         errors=errors,
         candidate_count=candidate_count,
+        rows=preview_rows,
     )

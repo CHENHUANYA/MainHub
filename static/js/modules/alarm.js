@@ -7,7 +7,7 @@ function normalizeAlarmEntry(entry) {
   const date = new Date(timeValue);
   return {
     code: entry.code || entry.alarm_code || '',
-    manual: entry.manual || '808d',
+    manual: entry.manual || window.AlarmApp.getState('defaultManual'),
     source: entry.source || 'Manual',
     machine_id: entry.machine_id || '',
     time: Number.isNaN(date.getTime())
@@ -26,7 +26,7 @@ function showBanner(code, manual, title, preview = '') {
 
   app.patchState({
     pendingCode: code,
-    pendingManual: manual || '808d',
+    pendingManual: manual || window.AlarmApp.getState('defaultManual'),
   });
   app.$('bannerCode').textContent = `ALARM ${code}`;
   if (app.$('bannerPreview')) {
@@ -59,7 +59,7 @@ function bannerLookup() {
   const bannerCodeText = app.$('bannerCode')?.textContent || '';
   const fallbackCode = bannerCodeText.match(/\d{2,6}/)?.[0] || '';
   const pendingCode = app.getState('pendingCode') || fallbackCode;
-  const pendingManual = app.getState('pendingManual') || '808d';
+  const pendingManual = app.getState('pendingManual') || window.AlarmApp.getState('defaultManual');
   if (!pendingCode) {
     return;
   }
@@ -325,12 +325,7 @@ async function loadBI() {
     </div>`;
   });
 
-  const manuals = [
-    { key: '808d', label: '808D' },
-    { key: '840d', label: '840D / 810D' },
-    { key: '840dsl', label: '840D sl' },
-    { key: 'furnace_b85t', label: 'FURNACE B85T' },
-  ];
+  const manuals = (app.getState('companyConfig')?.collections || []).map(item => ({ key: item.id, label: app.esc(item.display_name) }));
   const totalLogs = manuals.reduce((sum, manual) => sum + (alarmStats?.by_manual?.[manual.key] || 0), 0) || 1;
   app.$('biManualBody').innerHTML = manuals.map((manual) => {
     const count = alarmStats?.by_manual?.[manual.key] || 0;

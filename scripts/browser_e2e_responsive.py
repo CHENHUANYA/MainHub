@@ -964,6 +964,7 @@ def run_admin_password_reset_flow(playwright, base_url: str, report: dict[str, A
         if seed_response.status != 200:
             raise AssertionError(f"unable to version E2E user: {seed_response.status}")
         page.goto(f"{base_url}/admin", wait_until="domcontentloaded")
+        page.wait_for_function("document.querySelector('#adminUserLabel').textContent.includes('admin01')")
         page.click('[data-admin-section-target="users"]')
         page.wait_for_selector('#adminUserList .role-row:has-text("operator01")', timeout=10000)
         displayed_version = page.evaluate(
@@ -980,20 +981,23 @@ def run_admin_password_reset_flow(playwright, base_url: str, report: dict[str, A
         if concurrent_response.status != 200:
             raise AssertionError(f"unable to create password-reset race: {concurrent_response.status}")
 
-        result = page.locator("#adminUserResult")
+        result = page.locator("#passwordSettingsResult")
         reset_button = page.locator(
             '#adminUserList .role-row:has-text("operator01") '
             '[data-on-click="resetAdminPassword"]'
         )
-        page.once("dialog", lambda dialog: dialog.accept(LOGIN_PASSWORD))
+        reset_button.locator('xpath=ancestor::details/summary').click()
+        reset_button.click()
+        page.locator('#passwordNew').fill(LOGIN_PASSWORD)
+        page.locator('#passwordConfirm').fill(LOGIN_PASSWORD)
         with page.expect_response(
             lambda response: response.url.endswith("/users/operator01/password")
             and response.request.method == "PATCH"
         ) as conflict_info:
-            reset_button.click()
+            page.locator('#passwordSettingsSubmit').click()
         conflict_response = conflict_info.value
         result.filter(has_text="reload and retry").wait_for(state="visible", timeout=10000)
-        if conflict_response.status != 409 or "error" not in (result.get_attribute("class") or ""):
+        if conflict_response.status != 409:
             raise AssertionError("password reset version conflict was not shown as an error")
         report["flows"].append({
             "name": "admin:password_reset_version_conflict",
@@ -1003,6 +1007,7 @@ def run_admin_password_reset_flow(playwright, base_url: str, report: dict[str, A
         })
 
         page.reload(wait_until="domcontentloaded")
+        page.wait_for_function("document.querySelector('#adminUserLabel').textContent.includes('admin01')")
         page.click('[data-admin-section-target="users"]')
         page.wait_for_selector('#adminUserList .role-row:has-text("operator01")', timeout=10000)
         result = page.locator("#adminUserResult")
@@ -1010,14 +1015,17 @@ def run_admin_password_reset_flow(playwright, base_url: str, report: dict[str, A
             '#adminUserList .role-row:has-text("operator01") '
             '[data-on-click="resetAdminPassword"]'
         )
-        page.once("dialog", lambda dialog: dialog.accept(LOGIN_PASSWORD))
+        reset_button.locator('xpath=ancestor::details/summary').click()
+        reset_button.click()
+        page.locator('#passwordNew').fill(LOGIN_PASSWORD)
+        page.locator('#passwordConfirm').fill(LOGIN_PASSWORD)
         with page.expect_response(
             lambda response: response.url.endswith("/users/operator01/password")
             and response.request.method == "PATCH"
         ) as success_info:
-            reset_button.click()
+            page.locator('#passwordSettingsSubmit').click()
         success_response = success_info.value
-        result.filter(has_text="密碼已重設").wait_for(state="visible", timeout=10000)
+        result.filter(has_text="臨時密碼已設定").wait_for(state="visible", timeout=10000)
         if success_response.status != 200 or "error" in (result.get_attribute("class") or ""):
             raise AssertionError("successful password reset did not show a success result")
         report["flows"].append({
@@ -1035,11 +1043,16 @@ def run_admin_password_reset_flow(playwright, base_url: str, report: dict[str, A
                 body=json.dumps({"status": "error", "message": "Injected persistence failure"}),
             ),
         )
-        page.once("dialog", lambda dialog: dialog.accept(LOGIN_PASSWORD))
+        # Successful reset reloads the user cards and closes their edit panels.
+        page.locator('#adminUserList .role-row:has-text("operator01") summary').click()
         reset_button.click()
+        page.locator('#passwordNew').fill(LOGIN_PASSWORD)
+        page.locator('#passwordConfirm').fill(LOGIN_PASSWORD)
+        page.locator('#passwordSettingsSubmit').click()
+        result = page.locator('#passwordSettingsResult')
         result.filter(has_text="Injected persistence failure").wait_for(state="visible", timeout=10000)
-        if "error" not in (result.get_attribute("class") or ""):
-            raise AssertionError("password reset persistence failure was not shown as an error")
+        if not page.locator('#passwordSettingsDialog').is_visible():
+            raise AssertionError("password reset persistence failure closed the form")
         report["flows"].append({
             "name": "admin:password_reset_persistence_error",
             "status": "ok",

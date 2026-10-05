@@ -38,9 +38,9 @@ const WO_PRIORITY_LABEL = {
 
 const appState = {
   currentUser: coreApi.readAuthUser ? coreApi.readAuthUser() : null,
-  lookupManual: '808d',
-  kbCollection: '808d',
-  chatCollection: '808d',
+  lookupManual: '',
+  kbCollection: '',
+  chatCollection: '',
   lastQuery: '',
   pendingCode: null,
   pendingManual: null,
@@ -105,6 +105,7 @@ const DECLARATIVE_ACTIONS = new Set([
   'handleTextIngest',
   'ingestAdminText',
   'loadAdminConsole',
+  'loadAdminImportHistory',
   'loadAdminKb',
   'loadAdminSessions',
   'loadAdminSettings',
@@ -127,8 +128,12 @@ const DECLARATIVE_ACTIONS = new Set([
   'rebuildKnowledgeBase',
   'reopenOperatorIssue',
   'requestSupervisorRework',
+  'cancelSupervisorRework',
+  'submitSupervisorRework',
   'resetAdminPassword',
   'reviewAdminKnowledge',
+  'cancelAdminKnowledgeReview',
+  'submitAdminKnowledgeReview',
   'revokeAdminSession',
   'revokeAdminUserSessions',
   'saveAdminSettings',
@@ -139,6 +144,8 @@ const DECLARATIVE_ACTIONS = new Set([
   'saveSystemSettings',
   'saveWorkOrder',
   'selectAdminSection',
+  'openAdminWorkOrder',
+  'closeAdminWorkOrder',
   'selectChatManual',
   'selectKB',
   'selectManual',
@@ -152,6 +159,7 @@ const DECLARATIVE_ACTIONS = new Set([
   'toggleTestTools',
   'updateSupervisorOrder',
   'uploadAdminExcel',
+  'uploadAdminUserExcel',
   'uploadAdminPdf',
   'uploadExcel',
   'verifyOperatorIssue',
@@ -386,6 +394,7 @@ function applyAuthChrome() {
       button.addEventListener('click', logout);
       pill.appendChild(button);
     }
+    window.PasswordSettings?.attach(pill);
   });
 }
 
@@ -623,12 +632,7 @@ async function loadBI() {
     </div>`;
   });
 
-  const manuals = [
-    { key: '808d', label: '808D' },
-    { key: '840d', label: '840D / 810D' },
-    { key: '840dsl', label: '840D sl' },
-    { key: 'furnace_b85t', label: 'FURNACE B85T' },
-  ];
+  const manuals = (appState.companyConfig?.collections || []).map(item => ({ key: item.id, label: esc(item.display_name) }));
   const totalLogs = manuals.reduce((sum, manual) => sum + appState.alarmLog.filter((item) => item.manual === manual.key).length, 0) || 1;
   $('biManualBody').innerHTML = manuals.map((manual) => {
     const count = appState.alarmLog.filter((item) => item.manual === manual.key).length;
@@ -965,7 +969,91 @@ function initOperationsPage(options = {}) {
   }
 }
 
+let companyConfigPromise;
+
+function loadCompanyConfig() {
+  if (companyConfigPromise) return companyConfigPromise;
+  companyConfigPromise = (async () => {
+    try {
+      const config = await apiJson('/company-config');
+      if (config.status !== 'ok' || !config.collections?.length) {
+        throw new Error(config.message || '公司設定沒有可用知識庫');
+      }
+      patchState({ companyConfig: config, defaultManual: config.default_manual,
+        lookupManual: config.default_manual, kbCollection: config.default_manual,
+        chatCollection: config.default_manual });
+      const label = item => `${item.display_name}${item.ready ? '' : '（尚未建立索引）'}`;
+      document.querySelectorAll('[data-company-collections]').forEach(select => {
+        select.replaceChildren(...config.collections.map(item => new Option(label(item), item.id)));
+        select.value = config.default_manual;
+      });
+      const groups = { lookup: ['manual-btn', 'name', 'selectManual'],
+        chat: ['chat-manual-btn', 'col', 'selectChatManual'], kb: ['manual-btn', 'kb', 'selectKB'] };
+      document.querySelectorAll('[data-company-buttons]').forEach(host => {
+        const [className, key, action] = groups[host.dataset.companyButtons];
+        host.replaceWith(...config.collections.map(item => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = `${className}${item.id === config.default_manual ? ' active' : ''}`;
+          button.dataset[key] = item.id;
+          button.dataset.onClick = action;
+          button.dataset.actionTarget = '';
+          button.textContent = label(item);
+          return button;
+        }));
+      });
+      const brand = document.querySelector('header .logo-text');
+      if (brand && !brand.querySelector('[data-company-name]')) {
+        const company = document.createElement('div');
+        company.dataset.companyName = '';
+        brand.prepend(company);
+      }
+      document.querySelectorAll('[data-company-name]').forEach(node => {
+        node.textContent = config.company.display_name;
+        node.classList.add('company-name');
+      });
+      document.querySelector('header')?.classList.add('company-header');
+      document.title = `${config.company.display_name} · ${document.title}`;
+      function replaceInput(id, entries, placeholder) {
+        const input = $(id);
+        if (!input || !entries.length) return null;
+        const select = document.createElement('select');
+        select.id = id;
+        select.className = 'wo-select';
+        select.setAttribute('aria-label', input.getAttribute('aria-label') || placeholder);
+        select.append(new Option(placeholder, ''), ...entries.map(item => new Option(item.display_name, item.id)));
+        input.replaceWith(select);
+        return select;
+      }
+      const lineSelect = replaceInput('issueLine', config.lines, '選擇產線');
+      if (lineSelect && config.lines.length === 1) lineSelect.value = config.lines[0].id;
+      [['issueMachine', 'issueManual'], ['woMachine', 'woManual']].forEach(([machineId, manualId]) => {
+        const select = replaceInput(machineId, config.machines, '選擇設備');
+        select?.addEventListener('change', () => {
+          const machine = config.machines.find(item => item.id === select.value);
+          if (!machine) return;
+          if ($(manualId)) $(manualId).value = machine.collection;
+          if (machineId === 'issueMachine' && lineSelect) {
+            lineSelect.value = machine.line_id;
+            lineSelect.dispatchEvent(new Event('change'));
+          }
+        });
+      });
+      return true;
+    } catch (error) {
+      const message = document.createElement('p');
+      message.setAttribute('role', 'alert');
+      message.textContent = `公司設定載入失敗：${formatError(error)}。請重新整理後再試。`;
+      document.querySelector('main')?.prepend(message);
+      document.querySelectorAll('main button, main input, main select, main textarea').forEach(el => { el.disabled = true; });
+      return false;
+    }
+  })();
+  return companyConfigPromise;
+}
+
 window.AlarmApp = {
+  loadCompanyConfig,
   RAG_BASE,
   STORAGE_KEYS,
   LOOKUP_FIELDS,

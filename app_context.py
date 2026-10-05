@@ -34,7 +34,14 @@ from config_values import env_float, env_int
 from bm25_text import expand_query_with_domain_aliases
 from rag_engine import AlarmRAGEngine, extract_alarm_codes
 from repositories.runtime import postgres_store_enabled
-from secret_values import secret_value
+from services.company_config import collection_config
+from services.prompt_profiles import (
+    SYSTEM_PROMPT,
+    CHAT_SYSTEM_PROMPT,
+    DIAGNOSTIC_SYSTEM_PROMPT,
+    FREE_CHAT_SYSTEM,
+    prompts_for_collection,
+)
 from storage import (
     ALARM_LOG_PATH,
     DB_PATH,
@@ -52,13 +59,9 @@ from storage import (
 ensure_db_dir()
 
 
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://host.docker.internal:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "mistral-nemo:latest")
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama").strip().lower()
-SCHOOL_API_BASE_URL = os.getenv("SCHOOL_API_BASE_URL", "").rstrip("/")
-SCHOOL_API_KEY = secret_value("SCHOOL_API_KEY")
-SCHOOL_API_MODEL = os.getenv("SCHOOL_API_MODEL", "gpt-oss-120b")
-SCHOOL_API_FALLBACK_TO_OLLAMA = os.getenv("SCHOOL_API_FALLBACK_TO_OLLAMA", "true").strip().lower() == "true"
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma4:e2b")
+LLM_PROVIDER = "ollama"
 LLM_TIMEOUT_SECONDS = env_float("RAG_LLM_TIMEOUT_SECONDS", 20, minimum=0.1)
 RAG_CHAT_TOP_K = env_int("RAG_CHAT_TOP_K", 3, minimum=1, maximum=20)
 RAG_CONTEXT_CHARS_PER_DOC = env_int("RAG_CONTEXT_CHARS_PER_DOC", 1800, minimum=200)
@@ -68,70 +71,13 @@ OLLAMA_KEEP_ALIVE = os.getenv("OLLAMA_KEEP_ALIVE", "30m").strip() or "30m"
 REFERENCE_DIR = os.path.join(DB_PATH, "reference")
 FEEDBACK_LOG = os.path.join(DB_PATH, "feedback.jsonl")
 
-SYSTEM_PROMPT = """You are a SINUMERIK factory maintenance assistant.
-Your ONLY job is to copy the alarm information from the provided manual sections WORD FOR WORD.
-Do NOT paraphrase, summarize, or change any text. Do NOT add information from your own knowledge.
-Always respond in Traditional Chinese. Translate the output fields into Chinese.
-
-Output format — include ONLY the fields that exist in the manual section:
-
-**Alarm [code]:** [copy exact title including any %1 %2 placeholders]
-**Parameters:** [copy exactly — ONLY if the manual section has a Parameters field]
-**Explanation:** [copy every word exactly as written in the manual]
-**Reaction:** [copy every line exactly as written in the manual]
-**Remedy:** [copy every word exactly as written in the manual]
-**Program continuation:** [copy exactly as written in the manual]
-**Manual Page:** [page number]
-
-STRICT RULES:
-1. Copy text EXACTLY — do not change a single word, do not shorten any field
-2. If a field like Parameters exists in the manual section, you MUST include it
-3. Keep %1 %2 %3 placeholders exactly as they appear
-4. If the alarm code is NOT found in the provided sections, respond ONLY with:
-   無法在手冊中找到警報代碼 [code]，請確認代碼或建立索引後再試。
-5. Do NOT add any extra explanation or commentary outside the format above"""
-
-CHAT_SYSTEM_PROMPT = """You are a SINUMERIK CNC machine maintenance assistant with access to official manuals.
-Answer questions in Traditional Chinese unless the user writes in another language.
-
-When manual sections are provided, base your answer on them. You may:
-- Summarize and explain in plain language
-- Combine information from multiple sections
-- Answer follow-up questions using the conversation history
-- Say "根據手冊..." when citing manual content
-
-If the manual sections are not relevant to the question, answer from general CNC/SINUMERIK knowledge and clearly say so.
-Keep answers concise and practical for factory floor use."""
-
-DIAGNOSTIC_SYSTEM_PROMPT = """You are a SINUMERIK CNC maintenance assistant answering a troubleshooting question.
-Use ONLY facts supported by the retrieved sections. Answer the user's actual question in Traditional Chinese; do not merely
-copy or translate one alarm entry.
-
-GROUNDING RULES:
-1. A header such as [Alarm: 3000] proves that Alarm 3000 was found. Never claim that a requested code was not found when
-   the same code appears in a retrieved header.
-2. Start with the checks directly supported by the exact alarm section, then add relevant checks from the other retrieved
-   sections. Every check MUST end with its supporting source, for example [Alarm 3000, P.58] or [mock-week2-sop].
-3. Do not invent PLC bits, signal states, thresholds, causal relationships, or machine-specific procedures.
-4. Clearly distinguish official manual content from internal or MOCK DATA sources. Never present mock knowledge as an
-   official manual instruction.
-5. If the retrieved sections do not cover part of the user's scenario, say exactly what is not covered and ask for the
-   missing alarm code, PLC signal, or machine state needed to continue.
-6. Do not say a cause is likely unless a retrieved section explicitly states that relationship.
-7. Use at most six short bullets and 300 Traditional Chinese characters. Organize the answer as: direct conclusion, checks,
-   and missing evidence (only when needed)."""
-
 NOT_READY_TEMPLATE = """⚠️ The index for manual **{name}** has not been built yet.
 
 Please run:
 ```
-docker exec -it alarm_rag python ingest.py --pdf data/YOUR_MANUAL.pdf --name {name}
+docker compose exec alarm_rag python ingest.py --pdf data/YOUR_MANUAL.pdf --name {name}
 ```
-Then restart: `docker restart alarm_rag`"""
-
-FREE_CHAT_SYSTEM = """You are a helpful factory maintenance assistant for SINUMERIK CNC machines.
-Answer questions in Traditional Chinese (繁體中文) about machine operation, maintenance, and general technical topics.
-Be concise and practical."""
+Then restart: `docker compose restart alarm_rag`"""
 
 
 class Message(BaseModel):
@@ -149,7 +95,7 @@ class ChatRequest(BaseModel):
 
 class AlarmTrigger(BaseModel):
     alarm_code: str = Field(min_length=1, max_length=128)
-    manual: Optional[str] = Field(default="808d", max_length=64)
+    manual: Optional[str] = Field(default=None, max_length=64)
     machine_id: Optional[str] = Field(default=None, max_length=255)
     line_id: Optional[str] = Field(default=None, max_length=128)
     source: Optional[str] = Field(default="API", max_length=128)
@@ -220,7 +166,7 @@ def load_all_engines() -> None:
             get_engine(fname[5:-4])
     if not engines:
         logger.warning("No indexes found in %s/", db_path)
-        logger.warning("Run: docker exec -it alarm_rag python ingest.py --pdf data/manual.pdf --name mymanual")
+        logger.warning("Run: docker compose exec alarm_rag python ingest.py --pdf data/manual.pdf --name mymanual")
 
 
 def sort_documents(documents: list[dict]) -> list[dict]:
@@ -318,6 +264,8 @@ def _doc_identity(doc: dict) -> tuple[str, str, str, str]:
 
 def _retrieve_for_question(user_query: str, engine: AlarmRAGEngine) -> list[dict]:
     docs = engine.retrieve(user_query, top_k=RAG_CHAT_TOP_K)
+    if collection_config(getattr(engine, "collection_name", None)).prompt_profile != "cnc_maintenance_v1":
+        return docs
     if not is_troubleshooting_query(user_query) or len(docs) != 1 or RAG_CHAT_TOP_K <= 1:
         return docs
 
@@ -380,7 +328,9 @@ def _retrieval_context(docs: list[dict]) -> str:
         meta = doc.get("meta", {})
         source = meta.get("source") or meta.get("source_file") or meta.get("kind") or meta.get("type") or "manual"
         sections.append(
-            f"[Page {meta.get('page', '')} | Alarm: {meta.get('code', '')} | Source: {source}]\n"
+            f"[Page {meta.get('page', '')} | Alarm: {meta.get('code', '')} | Source: {source}"
+            f" | Kind: {meta.get('kind') or meta.get('type') or 'document'}"
+            f" | Official source: {bool(meta.get('official_source', False))}]\n"
             f"{str(doc.get('text') or '')[:RAG_CONTEXT_CHARS_PER_DOC]}"
         )
     return "\n\n".join(sections)
@@ -393,12 +343,22 @@ def build_augmented_messages(messages: List[Message], engine: AlarmRAGEngine) ->
 
     docs = _retrieve_for_question(user_query, engine)
     context = _retrieval_context(docs)
+    prompts = prompts_for_collection(getattr(engine, "collection_name", None))
 
     if len([m for m in messages if m.role == "user"]) == 1:
+        # The verbatim alarm template applies only to an explicit numeric alarm
+        # lookup. General equipment questions must be answered (or declined),
+        # not replaced by whichever alarm happened to be retrieved.
+        numeric_lookup = bool(extract_alarm_codes(user_query)) and (
+            bool(re.search(r"警報|警报|报警|代碼|代码|\balarm\b|\bcode\b", user_query, re.I))
+            or bool(re.fullmatch(r"\s*\d{3,6}(?:[\s,，、/]+\d{3,6})*\s*[?？]?\s*", user_query))
+        )
+        system_prompt = (prompts["diagnostic"] if is_troubleshooting_query(user_query)
+                         else prompts["lookup"] if numeric_lookup else prompts["chat"])
         return [
             {
                 "role": "system",
-                "content": DIAGNOSTIC_SYSTEM_PROMPT if is_troubleshooting_query(user_query) else SYSTEM_PROMPT,
+                "content": system_prompt,
             },
             {
                 "role": "user",
@@ -410,7 +370,7 @@ def build_augmented_messages(messages: List[Message], engine: AlarmRAGEngine) ->
     if len(history) > 6:
         history = history[-6:]
 
-    result = [{"role": "system", "content": CHAT_SYSTEM_PROMPT}]
+    result = [{"role": "system", "content": prompts["chat"]}]
     result.extend({"role": m.role, "content": m.content} for m in history)
     result.append({
         "role": "user",
@@ -718,7 +678,7 @@ def parse_alarm_code_int(code: str) -> Optional[int]:
 
 def classify_alarm(code_int: Optional[int], collection: str) -> dict:
     manual = (collection or "").lower()
-    if code_int is None:
+    if code_int is None or collection_config(collection).prompt_profile != "cnc_maintenance_v1":
         return {"type": "Other", "category": "Other", "severity": "info", "manual": manual}
     if code_int < 10000:
         return {"type": "NCK", "category": "System Core", "severity": "high", "manual": manual}

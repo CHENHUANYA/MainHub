@@ -5,9 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Alarm RAG 管理後台</title>
   <link rel="stylesheet" href="/static/css/tokens.css?v=1">
-  <link rel="stylesheet" href="/static/css/admin.css">
-  <link rel="stylesheet" href="/static/css/utilities.css?v=csp-1">
-  <link rel="stylesheet" href="/static/css/answer-trace.css">
+  <link rel="stylesheet" href="/static/css/admin.css?v=admin-forms-2">
+  <link rel="stylesheet" href="/static/css/excel-import.css?v=history-layout-1">
+  <link rel="stylesheet" href="/static/css/utilities.css?v=company-header-1">
+  <link rel="stylesheet" href="/static/css/answer-trace.css?v=trace-layout-2">
+  <link rel="stylesheet" href="/static/css/password-settings.css?v=1">
   <link rel="stylesheet" href="/static/css/accessibility.css?v=1">
 </head>
 <body data-page="admin">
@@ -58,35 +60,47 @@
     <section class="admin-section-panel" data-admin-section="users">
       <div class="admin-card accent-blue">
         <div class="section-label">👥 使用者與角色總覽</div>
-        <div class="admin-control-row">
-          <select class="wo-select" id="adminRoleFilter" aria-label="角色篩選">
+        <div class="admin-user-filters">
+          <label class="admin-form-field">角色<select class="wo-select" id="adminRoleFilter" aria-label="角色篩選">
             <option value="">全部角色</option>
-            <option value="operator">Operator</option>
-            <option value="maintenance">Maintenance</option>
-            <option value="supervisor">Supervisor</option>
-            <option value="admin">Admin</option>
-          </select>
-          <select class="wo-select" id="adminActiveFilter" aria-label="啟用狀態篩選">
+            <option value="operator">操作員</option>
+            <option value="maintenance">維修人員</option>
+            <option value="supervisor">主管</option>
+            <option value="admin">管理員</option>
+          </select></label>
+          <label class="admin-form-field">帳號狀態<select class="wo-select" id="adminActiveFilter" aria-label="啟用狀態篩選">
             <option value="">全部狀態</option>
             <option value="active">啟用</option>
             <option value="inactive">停用</option>
-          </select>
-          <input class="wo-input" id="adminUserSearch" placeholder="搜尋使用者、姓名、團隊、scope" aria-label="搜尋使用者">
-          <button class="wo-btn alt u-m-0" type="button" data-on-click="exportAdminUsersCsv">匯出</button>
+          </select></label>
+          <label class="admin-form-field">搜尋使用者<input class="wo-input" id="adminUserSearch" placeholder="帳號、姓名、團隊或產線" aria-label="搜尋使用者"></label>
+          <button class="wo-btn alt u-m-0" type="button" data-on-click="exportAdminUsersCsv">匯出清單</button>
         </div>
-        <div class="admin-control-row">
-          <input class="wo-input" id="adminNewUserId" placeholder="user_id" aria-label="新使用者 ID">
-          <input class="wo-input" id="adminNewUserName" placeholder="顯示名稱" aria-label="新使用者顯示名稱">
-          <input class="wo-input" id="adminNewUserTeam" placeholder="團隊" aria-label="新使用者團隊">
-          <select class="wo-select" id="adminNewUserRole" aria-label="新使用者角色">
-            <option value="operator">Operator</option>
-            <option value="maintenance">Maintenance</option>
-            <option value="supervisor">Supervisor</option>
-            <option value="admin">Admin</option>
-          </select>
-          <input class="wo-input" id="adminNewUserScope" placeholder="scope：LINE-A, LINE-B, *" aria-label="新使用者產線範圍">
-          <input class="wo-input" id="adminNewUserPassword" type="password" placeholder="密碼（預設 demo1234）" aria-label="新使用者密碼">
-          <button class="wo-btn u-m-0" type="button" data-on-click="createAdminUser">建立使用者</button>
+        <div class="admin-user-tools">
+        <details class="admin-form-disclosure" id="adminCreateUserPanel">
+          <summary>新增使用者<span>建立單一帳號並設定角色</span></summary>
+          <div class="admin-form-grid">
+          <label class="admin-form-field">登入帳號（必填）<input class="wo-input" id="adminNewUserId" placeholder="例如：maintenance02" aria-label="新使用者 ID" autocomplete="off"></label>
+          <label class="admin-form-field">顯示名稱<input class="wo-input" id="adminNewUserName" placeholder="姓名或稱呼" aria-label="新使用者顯示名稱"></label>
+          <label class="admin-form-field">團隊<input class="wo-input" id="adminNewUserTeam" placeholder="例如：維修組" aria-label="新使用者團隊"></label>
+          <label class="admin-form-field">角色<select class="wo-select" id="adminNewUserRole" aria-label="新使用者角色">
+            <option value="operator">操作員</option>
+            <option value="maintenance">維修人員</option>
+            <option value="supervisor">主管</option>
+            <option value="admin">管理員</option>
+          </select></label>
+          <label class="admin-form-field">產線範圍<input class="wo-input" id="adminNewUserScope" placeholder="LINE-A, LINE-B 或 *" aria-label="新使用者產線範圍"><small>多條產線以逗號分隔；* 代表全部產線。</small></label>
+          <label class="admin-form-field">初始密碼（必填）<input class="wo-input" id="adminNewUserPassword" type="password" autocomplete="new-password" placeholder="至少 8 個字元" aria-label="新使用者密碼"></label>
+          </div>
+          <div class="admin-form-actions"><button class="wo-btn u-m-0" type="button" data-on-click="createAdminUser">建立使用者</button></div>
+        </details>
+        <details class="admin-form-disclosure" id="adminImportUsersPanel">
+          <summary>批次匯入使用者<span>使用 Excel 範本，最多 200 筆</span></summary>
+          <p class="admin-help">先下載範本填寫，再上傳預覽。確認後才會建立帳號，新帳號首次登入須更改密碼。</p>
+          <label class="admin-form-field admin-file-field">人員 Excel 檔案<input class="admin-file-input" type="file" id="adminUserExcelFile" accept=".xlsx" data-on-change="uploadAdminUserExcel" data-action-target></label>
+          <div class="admin-form-actions"><a class="wo-btn alt" href="/users/import-template">下載 Excel 範本</a></div>
+          <div class="excel-result" id="adminUserExcelResult" role="status" aria-live="polite"></div>
+        </details>
         </div>
         <div class="upload-result" id="adminUserResult" role="status" aria-live="polite"></div>
         <div id="adminUserList" class="role-list"><div class="wo-empty">載入中...</div></div>
@@ -99,10 +113,24 @@
         <div class="admin-upload-zone" data-file-trigger="adminExcelFile">
           <div class="uz-icon xlsx">XLSX</div>
           <div class="uz-title">上傳 Excel 工單資料</div>
-          <div class="uz-sub">匯入後會更新 Work Order 與 BI 統計</div>
+          <div class="uz-sub">先預覽逐列錯誤，再確認匯入有效工單（最多 1000 筆）</div>
         </div>
-        <input class="u-hidden" type="file" id="adminExcelFile" accept=".xlsx,.xls" aria-label="選擇 Excel 匯入檔案" data-on-change="uploadAdminExcel" data-action-target>
+        <input class="u-hidden" type="file" id="adminExcelFile" accept=".xlsx" aria-label="選擇 Excel 匯入檔案" data-on-change="uploadAdminExcel" data-action-target>
         <div class="excel-result" id="adminExcelResult"></div>
+      </div>
+      <div class="admin-card admin-import-history">
+        <div class="section-label">人員／工單匯入履歷</div>
+        <p class="admin-help">查看已確認的匯入結果，展開批次可核對逐列紀錄。預覽及取消不會新增履歷。</p>
+        <div class="admin-control-row">
+          <select id="adminBatchKind" class="wo-select" aria-label="匯入履歷種類" data-on-change="loadAdminImportHistory">
+            <option value="">全部</option><option value="users">人員</option><option value="work_orders">工單</option>
+          </select>
+          <button type="button" class="wo-btn alt" data-on-click="loadAdminImportHistory">重新整理匯入履歷</button>
+        </div>
+        <div id="adminBatchHistory" class="role-list" aria-live="polite"></div>
+      </div>
+      <div class="admin-card">
+        <div class="section-label">文件匯入紀錄</div>
         <div id="adminImportLog" class="role-list role-list-spaced"></div>
       </div>
     </section>
@@ -135,12 +163,7 @@
       <div class="admin-card accent-purple">
         <div class="admin-kb-filter">
           <label class="wo-field-label" for="adminKbCollection">設備／手冊</label>
-          <select class="wo-select" id="adminKbCollection">
-            <option value="808d">808D</option>
-            <option value="840d">840D / 840Di / 810D</option>
-            <option value="840dsl">840D sl</option>
-            <option value="furnace_b85t">FURNACE B85T</option>
-          </select>
+          <select class="wo-select" id="adminKbCollection" data-company-collections><option value="">載入知識庫…</option></select>
           <button class="wo-btn alt" type="button" data-on-click="loadAdminKb">🔄 重新整理</button>
           <button class="wo-btn alt" type="button" data-on-click="exportAdminKbCsv">📄 匯出文件</button>
         </div>
@@ -240,6 +263,19 @@
           <button class="wo-btn alt u-m-0" type="button" data-on-click="exportAdminQualityCsv">📄 匯出品質清單</button>
         </div>
         <div class="upload-result" id="adminQualityResult" role="status" aria-live="polite"></div>
+        <section id="adminKnowledgeReviewForm" class="admin-knowledge-review u-hidden" aria-labelledby="adminKnowledgeReviewTitle">
+          <h3 id="adminKnowledgeReviewTitle"></h3>
+          <p id="adminKnowledgeReviewHint" class="admin-help"></p>
+          <div id="adminKnowledgeReviewNoteField">
+            <label class="admin-input-label" for="adminKnowledgeReviewNote" id="adminKnowledgeReviewNoteLabel">補充要求（必填）</label>
+            <textarea class="wo-text" id="adminKnowledgeReviewNote" rows="3" aria-describedby="adminKnowledgeReviewError"></textarea>
+          </div>
+          <p id="adminKnowledgeReviewError" class="u-text-danger" role="alert"></p>
+          <div class="admin-toolbar">
+            <button class="wo-btn" type="button" id="adminKnowledgeReviewSubmit" data-on-click="submitAdminKnowledgeReview">確認退回補充</button>
+            <button class="wo-btn alt" type="button" id="adminKnowledgeReviewCancel" data-on-click="cancelAdminKnowledgeReview">取消</button>
+          </div>
+        </section>
         <div class="rag-quality-split">
           <div>
             <div class="admin-subheading"><h3 id="adminQualityListTitle">⚠️ 待處理項目</h3><span id="adminQualityCount" class="admin-help" role="status" aria-live="polite"></span></div>
@@ -254,26 +290,31 @@
     </section>
 
     <section class="admin-section-panel" data-admin-section="settings">
-      <div class="admin-grid">
+      <div class="admin-grid admin-settings-layout">
+      <div class="admin-card accent-blue">
+        <div class="section-label">公司設定包</div>
+        <p class="admin-help">先上傳公司設定檔並預覽差異，確認後再套用。內容包含公司、設備、知識庫選項與流程預設；手冊文件需另行匯入。</p>
+        <label class="admin-form-field admin-file-field" for="companyConfigFile">公司設定檔（JSON）<input class="admin-file-input" id="companyConfigFile" type="file" accept=".json,application/json"></label>
+        <div class="wo-actions">
+          <button class="wo-btn alt" id="previewCompanyConfig" type="button">預覽設定差異</button>
+          <button class="wo-btn" id="applyCompanyConfig" type="button" disabled>套用已預覽設定</button>
+        </div>
+        <pre id="companyConfigPreview" class="company-config-preview" aria-live="polite"></pre>
+      </div>
       <div class="admin-card accent-amber">
         <div class="section-label">⚙️ 系統設定</div>
         <div class="admin-settings-grid">
           <div class="wo-field">
-            <label class="wo-field-label">預設手冊</label>
-            <select class="wo-select" id="adminDefaultManual" aria-label="預設手冊">
-              <option value="808d">808D</option>
-              <option value="840d">840D</option>
-              <option value="840dsl">840D sl</option>
-              <option value="furnace_b85t">FURNACE B85T</option>
-            </select>
+            <label class="wo-field-label" for="adminDefaultManual">預設手冊</label>
+            <select class="wo-select" id="adminDefaultManual" aria-label="預設手冊" data-company-collections><option value="">載入知識庫…</option></select>
           </div>
           <div class="wo-field">
-            <label class="wo-field-label">登入有效時數</label>
+            <label class="wo-field-label" for="adminSessionHours">登入有效時數</label>
             <input class="wo-input" id="adminSessionHours" type="number" min="1" max="72" step="1" aria-label="登入有效時數">
           </div>
           <label class="settings-toggle">
             <input id="adminAllowOperatorReopen" type="checkbox">
-            <span>允許 Operator 重新開啟已完成問題</span>
+            <span>允許操作員重新開啟已完成問題</span>
           </label>
         </div>
         <div class="wo-actions">
@@ -283,8 +324,9 @@
         <div class="upload-result" id="adminSettingsResult"></div>
       </div>
 
-      <div class="admin-card accent-red">
+      <div class="admin-card admin-system-audit">
         <div class="section-label">📋 系統稽核</div>
+        <p class="admin-help">最近 12 筆匯入與設定紀錄，依時間由新到舊排列。</p>
         <div id="adminAuditList" class="audit-list"><div class="wo-empty">載入中...</div></div>
       </div>
     </div>
@@ -293,10 +335,21 @@
   </div>
 </main>
 
+<dialog id="adminWorkOrderDialog" class="admin-order-dialog" aria-labelledby="adminWorkOrderTitle">
+  <div class="admin-order-heading">
+    <div><h2 id="adminWorkOrderTitle">工單紀錄</h2><p class="admin-help">維修內容與知識審核紀錄</p></div>
+    <button class="wo-btn alt" type="button" data-on-click="closeAdminWorkOrder" autofocus>關閉</button>
+  </div>
+  <div id="adminWorkOrderContent" class="admin-order-content"></div>
+</dialog>
+
 <script src="/static/js/core/api.js"></script>
-<script src="/static/alarm_app.js"></script>
-<script src="/static/js/modules/audit.js"></script>
-<script src="/static/js/modules/answer_trace.js"></script>
-<script src="/static/js/pages/admin.js"></script>
+<script src="/static/alarm_app.js?v=password-1"></script>
+<script src="/static/js/modules/audit.js?v=audit-readable-2"></script>
+<script src="/static/js/modules/answer_trace.js?v=trace-layout-2"></script>
+<script src="/static/js/pages/admin.js?v=password-1"></script>
+<script src="/static/js/modules/excel-import.js"></script>
+<script src="/static/js/modules/import-history.js?v=history-layout-1"></script>
+<script src="/static/js/modules/password-settings.js?v=1"></script>
 </body>
 </html>

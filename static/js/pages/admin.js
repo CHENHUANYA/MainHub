@@ -3,8 +3,9 @@ function adminApp() {
 }
 
 const ADMIN_ROLES = ['operator', 'maintenance', 'supervisor', 'admin'];
+const ADMIN_ROLE_LABELS = { operator: '操作員', maintenance: '維修人員', supervisor: '主管', admin: '管理員' };
 const ADMIN_IMPORT_TYPES = new Set(['excel', 'import', 'workorder']);
-const ADMIN_COLLECTIONS = ['808d', '840d', '840dsl', 'furnace_b85t'];
+function adminCollections() { return (adminApp()?.getState('companyConfig')?.collections || []).map(item => item.id); }
 const ADMIN_SECTIONS = new Set(['overview', 'users', 'data', 'knowledge', 'quality', 'sessions', 'settings']);
 const ADMIN_NEW_USER_FIELDS = [
   'adminNewUserId',
@@ -71,7 +72,7 @@ function setAdminResult(id, message, isError = false) {
 }
 
 function activeAdminCollection() {
-  return adminApp()?.$('adminKbCollection')?.value || '808d';
+  return adminApp()?.$('adminKbCollection')?.value || window.AlarmApp.getState('defaultManual');
 }
 
 function activeAdminSectionFromHash() {
@@ -158,14 +159,14 @@ function filterAdminUsers(users) {
       return true;
     }
     const scope = Array.isArray(user.line_scope) ? user.line_scope.join(' ') : '';
-    return [user.user_id, user.role, user.name, user.team, scope]
+    return [user.user_id, user.role, ADMIN_ROLE_LABELS[user.role], user.name, user.team, scope]
       .some((value) => String(value || '').toLowerCase().includes(search));
   });
 }
 
 function renderAdminRoleOptions(selectedRole) {
   return ADMIN_ROLES
-    .map((role) => `<option value="${role}" ${selectedRole === role ? 'selected' : ''}>${role}</option>`)
+    .map((role) => `<option value="${role}" ${selectedRole === role ? 'selected' : ''}>${ADMIN_ROLE_LABELS[role]}</option>`)
     .join('');
 }
 
@@ -199,28 +200,30 @@ function renderAdminUser(app, user) {
   const lineScope = Array.isArray(user.line_scope) ? user.line_scope.join(', ') : '';
   const active = user.active !== false;
   const safeId = adminAttr(userId);
-  return `<div class="role-row compact">
+  return `<div class="role-row compact admin-user-card">
     <div>
-      <div class="wo-code">${app.esc(userId)} | ${app.esc(user.role)} ${active ? '' : '| inactive'}</div>
+      <div class="admin-user-heading"><div class="wo-code">${app.esc(user.name || userId)} <span class="admin-user-account">${app.esc(userId)}</span></div><span class="tag-friendly ${active ? 'tag-correct' : 'tag-default'}">${active ? '啟用中' : '已停用'}</span></div>
       <div class="wo-meta">
-        <span class="wo-badge">${app.esc(user.name || '-')}</span>
+        <span class="wo-badge">${app.esc(ADMIN_ROLE_LABELS[user.role] || user.role)}</span>
         <span class="wo-badge">團隊 ${app.esc(user.team || '-')}</span>
-        <span class="wo-badge">scope ${app.esc(lineScope || '-')}</span>
+        <span class="wo-badge">產線 ${app.esc(lineScope === '*' ? '全部' : lineScope || '未設定')}</span>
       </div>
+      <details class="admin-user-edit-panel"><summary>編輯帳號資料</summary>
       <div class="role-user-edit">
-        <input class="wo-input" id="adminName_${safeId}" value="${adminAttr(user.name || '')}" placeholder="顯示名稱" aria-label="${safeId} 的顯示名稱">
-        <input class="wo-input" id="adminTeam_${safeId}" value="${adminAttr(user.team || '')}" placeholder="團隊" aria-label="${safeId} 的團隊">
-        <select class="wo-select" id="adminRole_${safeId}" aria-label="${safeId} 的角色">
+        <label class="admin-form-field">顯示名稱<input class="wo-input" id="adminName_${safeId}" value="${adminAttr(user.name || '')}" placeholder="顯示名稱" aria-label="${safeId} 的顯示名稱"></label>
+        <label class="admin-form-field">團隊<input class="wo-input" id="adminTeam_${safeId}" value="${adminAttr(user.team || '')}" placeholder="團隊" aria-label="${safeId} 的團隊"></label>
+        <label class="admin-form-field">角色<select class="wo-select" id="adminRole_${safeId}" aria-label="${safeId} 的角色">
           ${renderAdminRoleOptions(user.role)}
-        </select>
-        <input class="wo-input" id="adminScope_${safeId}" value="${adminAttr(lineScope)}" placeholder="LINE-A, LINE-B 或 *" aria-label="${safeId} 的產線範圍">
+        </select></label>
+        <label class="admin-form-field">產線範圍<input class="wo-input" id="adminScope_${safeId}" value="${adminAttr(lineScope)}" placeholder="LINE-A, LINE-B 或 *" aria-label="${safeId} 的產線範圍"></label>
         <div class="wo-actions u-mt-0">
-          <button class="wo-btn alt" type="button" data-on-click="resetAdminPassword" data-action-args="[${adminJsArg(userId)}]">重設密碼</button>
-          <button class="wo-btn alt" type="button" data-on-click="revokeAdminUserSessions" data-action-args="[${adminJsArg(userId)}]">撤銷 Session</button>
+          <button class="wo-btn alt" type="button" data-on-click="resetAdminPassword" data-action-args="[${adminJsArg(userId)}]">協助重設密碼</button>
+          <button class="wo-btn alt" type="button" data-on-click="revokeAdminUserSessions" data-action-args="[${adminJsArg(userId)}]">登出所有裝置</button>
           <button class="wo-btn alt" type="button" data-on-click="saveAdminUser" data-action-args="[${adminJsArg(userId)}]">儲存</button>
           <button class="wo-btn ${active ? 'danger' : 'alt'}" type="button" data-on-click="toggleAdminUser" data-action-args="[${adminJsArg(userId)}, ${active ? 'false' : 'true'}]">${active ? '停用' : '啟用'}</button>
         </div>
       </div>
+      </details>
     </div>
   </div>`;
 }
@@ -238,7 +241,7 @@ function renderAdminUsers(users) {
   const filteredUsers = filterAdminUsers(users);
   const roleCounts = countAdminRoles(users);
   target.innerHTML = `<div class="role-mini-grid">
-    ${[...roleCounts].map(([role, count]) => `<div class="role-mini-card"><span>${app.esc(role)}</span><b>${count}</b><small>users</small></div>`).join('')}
+    ${[...roleCounts].map(([role, count]) => `<div class="role-mini-card"><span>${app.esc(ADMIN_ROLE_LABELS[role] || role)}</span><b>${count}</b><small>人</small></div>`).join('')}
   </div>
   <div class="wo-note">顯示 ${filteredUsers.length} / ${users.length}</div>
   ${filteredUsers.length ? filteredUsers.map((user) => renderAdminUser(app, user)).join('') : adminEmpty('wo-empty', '沒有符合條件的使用者')}`;
@@ -340,7 +343,7 @@ function renderAdminAudit(ingestEntries, settings) {
       title: 'settings_updated',
       actor: settings.updated_by || 'admin',
       time: settings.updated_at,
-      detail: `default_manual=${settings.default_manual}, session_hours=${settings.session_hours}`,
+      detail: `預設手冊：${settings.default_manual}；登入有效時間：${settings.session_hours} 小時`,
     } : null,
   ].filter(Boolean).sort((left, right) => new Date(right.time || 0) - new Date(left.time || 0)).slice(0, 12);
   app.setState('adminAuditEvents', events);
@@ -348,12 +351,14 @@ function renderAdminAudit(ingestEntries, settings) {
     target.innerHTML = adminEmpty('wo-empty', '尚無系統稽核事件');
     return;
   }
+  const auditLabels = { text: '文字知識入庫', pdf: 'PDF 文件匯入', excel: 'Excel 資料匯入',
+    import: '資料匯入', workorder: '工單知識入庫', kb_event: '知識庫更新', settings_updated: '更新系統設定' };
   target.innerHTML = events.map((event) => `<div class="audit-event">
     <div class="audit-dot"></div>
     <div class="audit-body">
-      <div class="audit-title">${app.esc(event.title)}</div>
-      <div class="audit-meta">${app.esc(event.actor)} | ${app.esc(adminTime(event.time))}</div>
-      <div class="audit-fields">${app.esc(event.detail)}</div>
+      <div class="audit-title">${app.esc(auditLabels[event.title] || event.title)}</div>
+      <div class="audit-meta">${app.esc(event.actor === 'system' ? '系統' : event.actor)} · ${app.esc(adminTime(event.time))}</div>
+      <div class="audit-fields">${app.esc(String(event.detail).replace(/^Work order /, '工單 '))}</div>
     </div>
   </div>`).join('');
 }
@@ -397,6 +402,10 @@ function normalizeAdminQualityItems(orders, feedbackEntries) {
       version: order.version || 1,
       answer_id: order.rag_answer_id || '',
       query: order.description || '',
+      root_cause: order.root_cause || '',
+      repair_action: order.repair_action || '',
+      resolution: order.resolution || '',
+      notes: order.notes || '',
       feedback: '',
       role: order.updated_by || order.assigned_to || '',
       correctness,
@@ -477,6 +486,10 @@ function adminQualityFilteredItems() {
       item.query,
       item.missing_info,
       item.expected_fix,
+      item.root_cause,
+      item.repair_action,
+      item.resolution,
+      item.notes,
       item.correctness,
       item.coverage,
       item.role,
@@ -550,7 +563,7 @@ function renderAdminQualityItem(app, item) {
        <button class="wo-btn danger" type="button" data-on-click="reviewAdminKnowledge" data-action-args="[${adminJsArg(item.work_order_id)}, &quot;reject&quot;, ${Number(item.version) || 1}]">❌ 不採用</button>`
     : '';
   const action = reviewActions || (item.work_order_id
-    ? `<button class="wo-btn alt" type="button" data-on-click="selectAdminSection" data-action-args="[&quot;data&quot;]">查看工單</button>`
+    ? `<button class="wo-btn alt" type="button" data-on-click="openAdminWorkOrder" data-action-args="[${adminJsArg(item.work_order_id)}]">查看工單</button>`
     : `<button class="wo-btn alt" type="button" data-on-click="selectAdminSection" data-action-args="[&quot;knowledge&quot;]">📚 補充知識內容</button>`);
 
   const correctnessTag = item.correctness ? qualityTagClass(item.correctness) : 'tag-default';
@@ -574,7 +587,10 @@ function renderAdminQualityItem(app, item) {
       ${item.kb_review_note ? `<div class="wo-note">💬 審核備註：${app.esc(item.kb_review_note)}</div>` : ''}
       <details class="admin-item-details"><summary>📄 查看評估與處理詳情</summary>
         ${item.query ? `<p class="wo-desc">❓ 問題：${app.esc(item.query)}</p>` : ''}
-        ${item.expected_fix ? `<p class="wo-desc">💡 建議補充／處理方式：${app.esc(item.expected_fix)}</p>` : ''}
+        ${item.type === 'work_order'
+          ? [['root_cause', '根本原因'], ['repair_action', '實際維修動作'], ['resolution', '處理結果／解決方案'], ['notes', '維修備註／補充內容']]
+            .map(([key, label]) => `<div class="admin-work-detail"><strong>${label}</strong><p class="wo-desc">${app.esc(item[key] || '未填寫')}</p></div>`).join('')
+          : item.expected_fix ? `<p class="wo-desc">💡 建議補充／處理方式：${app.esc(item.expected_fix)}</p>` : ''}
         <p class="admin-help">🕐 更新時間：${app.esc(adminTime(item.time))}</p>
         ${item.answer_id ? `<p class="admin-help">🏷️ 回答編號：${app.esc(item.answer_id)}</p>` : ''}
         ${item.kb_reviewed_by ? `<p class="admin-help">👤 審核者：${app.esc(item.kb_reviewed_by)}</p>` : ''}
@@ -582,6 +598,45 @@ function renderAdminQualityItem(app, item) {
     </div>
     <div class="role-row-actions">${answerAction}${action}</div>
   </div>`;
+}
+
+function openAdminWorkOrder(workOrderId) {
+  const app = adminApp();
+  const dialog = app?.$('adminWorkOrderDialog');
+  if (!app || !dialog) return;
+  const order = (app.getState('adminWorkOrders') || []).find(item => String(item.id) === String(workOrderId));
+  app.$('adminWorkOrderTitle').textContent = `工單 ${workOrderId}`;
+  const content = app.$('adminWorkOrderContent');
+  if (!order) {
+    content.textContent = '目前清單找不到這筆工單，請關閉視窗並重新整理後再試。';
+  } else {
+    const audit = window.AlarmAudit;
+    const field = (label, value) => `<div class="admin-work-detail"><strong>${app.esc(label)}</strong><p>${app.esc(value || '未填寫')}</p></div>`;
+    const history = audit?.mergeEvents(order.work_order_history, []) || [];
+    content.innerHTML = `<div class="admin-order-facts">${[
+      ['工單狀態', audit?.statusLabel(order.status) || order.status],
+      ['知識審核', qualityLabel(order.kb_review_status)],
+      ['設備', order.machine_id], ['警報代碼', order.alarm_code],
+      ['接單人員', order.assigned_to], ['驗證人員', order.verified_by],
+    ].map(([label, value]) => field(label, value)).join('')}</div>
+      ${[['問題描述', order.description], ['根本原因', order.root_cause],
+        ['實際維修動作', order.repair_action], ['處理結果／解決方案', order.resolution],
+        ['維修備註／補充內容', audit?.displayNote(order.notes) || order.notes],
+        ['審核備註', order.kb_review_note]].map(([label, value]) => field(label, value)).join('')}
+      <details class="admin-order-history"><summary>處理歷程（${history.length} 筆）</summary>
+        ${history.length ? history.map(event => `<div class="admin-order-event">
+          <strong>${app.esc(audit.actionLabel(event.action, event.audit_source))}</strong>
+          <p class="admin-help">${app.esc(event.user_id || '系統')} · ${app.esc(adminTime(event.created_at))}</p>
+          ${event.from_status || event.to_status ? `<p>${app.esc(audit.statusLabel(event.from_status))} → ${app.esc(audit.statusLabel(event.to_status))}</p>` : ''}
+          ${audit.renderChanges(app, event)}</div>`).join('') : '<p class="admin-help">尚無處理歷程</p>'}
+      </details>`;
+  }
+  if (!dialog.open) dialog.showModal();
+  content.scrollTop = 0;
+}
+
+function closeAdminWorkOrder() {
+  adminApp()?.$('adminWorkOrderDialog')?.close();
 }
 
 function renderAdminQualitySummary(feedbackStats, workOrders, qualityItems) {
@@ -596,11 +651,11 @@ function renderAdminQualitySummary(feedbackStats, workOrders, qualityItems) {
   ).length;
   const rate = (value, total) => Number(total) > 0 ? app.esc(value || '0%') : '—';
   target.innerHTML = `
-    <div class="quality-score-card"><div class="score-icon ${gaps > 0 ? 'warn' : 'ok'}">${gaps > 0 ? '⚠️' : '✅'}</div><span class="wo-field-label">待處理項目</span><b class="role-kpi-card b" style="font-size:28px;color:${gaps > 0 ? 'var(--org)' : 'var(--grn)'}">${gaps}</b><small class="wo-desc">需要改善或審核的紀錄</small></div>
-    <div class="quality-score-card"><div class="score-icon ${candidates > 0 ? 'info' : 'ok'}">${candidates > 0 ? '📝' : '✅'}</div><span class="wo-field-label">待審核知識</span><b class="role-kpi-card b" style="font-size:28px;color:${candidates > 0 ? 'var(--acc)' : 'var(--grn)'}">${candidates}</b><small class="wo-desc">待確認、補充或重試的工單</small></div>
-    <div class="quality-score-card"><div class="score-icon info">👍</div><span class="wo-field-label">回答有幫助</span><b class="role-kpi-card b" style="font-size:28px">${rate(feedbackStats?.rate, feedbackStats?.total)}</b><small class="wo-desc">${feedbackStats?.total ? `${Number(feedbackStats.total)} 筆使用者回饋` : '尚無使用者回饋'}</small></div>
-    <div class="quality-score-card"><div class="score-icon info">✅</div><span class="wo-field-label">回答正確率</span><b class="role-kpi-card b" style="font-size:28px">${rate(feedbackStats?.correctness_rate, feedbackStats?.correctness_total)}</b><small class="wo-desc">${feedbackStats?.correctness_total ? `${Number(feedbackStats.correctness_total)} 筆正確性評估` : '尚無正確性評估'}</small></div>
-    <div class="quality-score-card"><div class="score-icon info">📊</div><span class="wo-field-label">回答完整率</span><b class="role-kpi-card b" style="font-size:28px">${rate(feedbackStats?.coverage_rate, feedbackStats?.coverage_total)}</b><small class="wo-desc">${feedbackStats?.coverage_total ? `${Number(feedbackStats.coverage_total)} 筆完整度評估` : '尚無完整度評估'}</small></div>`;
+    <div class="quality-score-card"><div class="score-icon ${gaps > 0 ? 'warn' : 'ok'}">${gaps > 0 ? '⚠️' : '✅'}</div><span class="wo-field-label">待處理項目</span><b class="quality-metric ${gaps > 0 ? 'u-text-warning' : 'u-text-success'}">${gaps}</b><small class="wo-desc">需要改善或審核的紀錄</small></div>
+    <div class="quality-score-card"><div class="score-icon ${candidates > 0 ? 'info' : 'ok'}">${candidates > 0 ? '📝' : '✅'}</div><span class="wo-field-label">待審核知識</span><b class="quality-metric ${candidates > 0 ? 'u-text-accent' : 'u-text-success'}">${candidates}</b><small class="wo-desc">待確認、補充或重試的工單</small></div>
+    <div class="quality-score-card"><div class="score-icon info">👍</div><span class="wo-field-label">回答有幫助</span><b class="quality-metric">${rate(feedbackStats?.rate, feedbackStats?.total)}</b><small class="wo-desc">${feedbackStats?.total ? `${Number(feedbackStats.total)} 筆使用者回饋` : '尚無使用者回饋'}</small></div>
+    <div class="quality-score-card"><div class="score-icon info">✅</div><span class="wo-field-label">回答正確率</span><b class="quality-metric">${rate(feedbackStats?.correctness_rate, feedbackStats?.correctness_total)}</b><small class="wo-desc">${feedbackStats?.correctness_total ? `${Number(feedbackStats.correctness_total)} 筆正確性評估` : '尚無正確性評估'}</small></div>
+    <div class="quality-score-card"><div class="score-icon info">📊</div><span class="wo-field-label">回答完整率</span><b class="quality-metric">${rate(feedbackStats?.coverage_rate, feedbackStats?.coverage_total)}</b><small class="wo-desc">${feedbackStats?.coverage_total ? `${Number(feedbackStats.coverage_total)} 筆完整度評估` : '尚無完整度評估'}</small></div>`;
 }
 
 function renderAdminQuality(feedbackStats, workOrders) {
@@ -663,42 +718,87 @@ function exportAdminQualityCsv() {
   ]);
 }
 
-async function reviewAdminKnowledge(workOrderId, action, version) {
-  const app = adminApp();
-  if (!app) {
-    return;
-  }
-  let note = '';
-  if (action === 'needs_revision') {
-    note = window.prompt('請輸入需要 Maintenance 補充的內容：', '') || '';
-    if (!note.trim()) {
-      return;
-    }
-  } else if (action === 'reject') {
-    note = window.prompt('不採用原因（選填）：', '') || '';
-    if (!window.confirm(`確定不採用工單 ${workOrderId} 的候選知識？`)) {
-      return;
-    }
-  } else if (!window.confirm(`核准工單 ${workOrderId} 並寫入 RAG 知識庫？`)) {
-    return;
-  }
+const ADMIN_KNOWLEDGE_REVIEW_ACTIONS = {
+  needs_revision: { title: '退回補充', confirm: '確認退回補充', hint: '請寫明需要維修人員補充的內容，確認後會記錄為審核備註。' },
+  reject: { title: '不採用', confirm: '確認不採用', hint: '確認後，這筆維修紀錄會標記為不採用，不會加入知識庫。' },
+  approve: { title: '核准加入知識庫', confirm: '確認核准並加入', hint: '請確認維修內容正確、完整，確認後會加入知識庫供後續查詢。' },
+};
 
+function cancelAdminKnowledgeReview() {
+  const app = adminApp();
+  if (!app || app.getState('adminKnowledgeReviewSubmitting')) return;
+  const review = app.getState('adminKnowledgeReview');
+  app.$('adminKnowledgeReviewForm')?.classList.add('u-hidden');
+  app.$('adminKnowledgeReviewNote').value = '';
+  app.$('adminKnowledgeReviewError').textContent = '';
+  app.setState('adminKnowledgeReview', null);
+  if (review?.trigger && document.contains(review.trigger)) review.trigger.focus();
+}
+
+function reviewAdminKnowledge(workOrderId, action, version) {
+  const app = adminApp();
+  const config = ADMIN_KNOWLEDGE_REVIEW_ACTIONS[action];
+  const form = app?.$('adminKnowledgeReviewForm');
+  if (!app || !form || !config || app.getState('adminKnowledgeReviewSubmitting')) return;
+  app.setState('adminKnowledgeReview', { workOrderId, action, version, trigger: document.activeElement });
+  app.$('adminKnowledgeReviewTitle').textContent = `${config.title}：工單 ${workOrderId}`;
+  app.$('adminKnowledgeReviewHint').textContent = config.hint;
+  app.$('adminKnowledgeReviewNoteLabel').textContent = action === 'needs_revision' ? '補充要求（必填）' : '不採用原因（選填）';
+  const note = app.$('adminKnowledgeReviewNote');
+  note.value = '';
+  note.required = action === 'needs_revision';
+  app.$('adminKnowledgeReviewNoteField').classList.toggle('u-hidden', action === 'approve');
+  app.$('adminKnowledgeReviewError').textContent = '';
+  app.$('adminKnowledgeReviewSubmit').textContent = config.confirm;
+  app.$('adminKnowledgeReviewSubmit').classList.toggle('danger', action === 'reject');
+  form.classList.remove('u-hidden');
+  form.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  (action === 'approve' ? app.$('adminKnowledgeReviewSubmit') : note).focus({ preventScroll: true });
+}
+
+async function submitAdminKnowledgeReview() {
+  const app = adminApp();
+  const review = app?.getState('adminKnowledgeReview');
+  if (!app || !review || app.getState('adminKnowledgeReviewSubmitting')) return;
+  const { workOrderId, action, version } = review;
+  const input = app.$('adminKnowledgeReviewNote');
+  const note = action === 'approve' ? '' : input.value.trim();
+  const errorBox = app.$('adminKnowledgeReviewError');
+  if (action === 'needs_revision' && !note) {
+    errorBox.textContent = '請填寫需要維修人員補充的內容。';
+    input.focus();
+    return;
+  }
+  errorBox.textContent = '';
+  app.setState('adminKnowledgeReviewSubmitting', true);
+  app.$('adminKnowledgeReviewSubmit').disabled = true;
+  app.$('adminKnowledgeReviewCancel').disabled = true;
+  input.disabled = true;
+  app.$('adminKnowledgeReviewSubmit').textContent = '送出中…';
   try {
-    const data = await adminJson(`/work-orders/${encodeURIComponent(workOrderId)}/knowledge-review`, {
+    await adminJson(`/work-orders/${encodeURIComponent(workOrderId)}/knowledge-review`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action, note, version }),
     }, '知識審核失敗');
     const messages = {
       approve: '已核准並寫入知識庫',
-      needs_revision: '已退回 Maintenance 補充',
+      needs_revision: '已退回維修人員補充',
       reject: '已標記為不採用',
     };
     setAdminResult('adminQualityResult', `${messages[action]}：工單 ${workOrderId}`);
     await loadAdminConsole();
+    app.setState('adminKnowledgeReviewSubmitting', false);
+    cancelAdminKnowledgeReview();
   } catch (error) {
-    setAdminResult('adminQualityResult', app.formatError(error, '知識審核失敗'), true);
+    errorBox.textContent = app.formatError(error, '知識審核失敗');
     await loadAdminConsole();
+  } finally {
+    app.setState('adminKnowledgeReviewSubmitting', false);
+    app.$('adminKnowledgeReviewSubmit').disabled = false;
+    app.$('adminKnowledgeReviewCancel').disabled = false;
+    input.disabled = false;
+    app.$('adminKnowledgeReviewSubmit').textContent = ADMIN_KNOWLEDGE_REVIEW_ACTIONS[action].confirm;
   }
 }
 
@@ -730,7 +830,7 @@ async function loadAdminKbHealth() {
   if (!app) {
     return;
   }
-  const results = await Promise.all(ADMIN_COLLECTIONS.map(async (collection) => {
+  const results = await Promise.all(adminCollections().map(async (collection) => {
     try {
       const data = await app.apiJson(`/v1/${encodeURIComponent(collection)}/documents`);
       return { collection, summary: data.summary || {}, documents: data.documents || [] };
@@ -826,8 +926,9 @@ async function loadAdminSettings() {
   try {
     const data = await adminJson('/system-settings', undefined, 'settings load failed');
     const settings = data.settings || {};
-    app.$('adminDefaultManual').value = settings.default_manual || '808d';
+    app.$('adminDefaultManual').value = settings.default_manual || window.AlarmApp.getState('defaultManual');
     app.$('adminSessionHours').value = String(settings.session_hours || 12);
+    app.$('adminSessionHours').disabled = settings.session_hours_source === 'environment';
     app.$('adminAllowOperatorReopen').checked = Boolean(settings.allow_operator_reopen);
     app.setState('adminSettingsRevision', settings.revision || '');
     setAdminResult('adminSettingsResult', settings.updated_by ? `設定已載入，最後更新者 ${settings.updated_by}` : '設定已載入');
@@ -849,12 +950,13 @@ async function saveAdminSettings() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         default_manual: app.$('adminDefaultManual').value,
-        session_hours: Number(app.$('adminSessionHours').value || 12),
+        session_hours: app.$('adminSessionHours').disabled ? undefined : Number(app.$('adminSessionHours').value || 12),
         allow_operator_reopen: app.$('adminAllowOperatorReopen').checked,
         expected_revision: app.getState('adminSettingsRevision') || '',
       }),
     }, '設定儲存失敗');
     app.setState('adminSettingsRevision', data.settings.revision || '');
+    app.setState('defaultManual', data.settings.default_manual);
     setAdminResult('adminSettingsResult', `設定已儲存，updated_by=${data.settings.updated_by || app.currentUserId()}`);
     loadAdminConsole();
   } catch (error) {
@@ -1026,7 +1128,7 @@ async function rebuildAllAdminKb() {
     return;
   }
   const results = [];
-  for (const collection of ADMIN_COLLECTIONS) {
+  for (const collection of adminCollections()) {
     try {
       const data = await rebuildAdminCollection(collection);
       results.push(`${collection}:${data.sections || data.total_sections || 0}`);
@@ -1059,26 +1161,13 @@ function exportAdminKbCsv() {
 
 async function uploadAdminExcel(input) {
   const app = adminApp();
-  const file = input.files[0];
-  const result = app?.$('adminExcelResult');
-  if (!app || !file || !result) {
-    return;
-  }
-  const formData = new FormData();
-  formData.append('file', file);
-  result.className = 'excel-result show';
-  result.textContent = `上傳中：${file.name}`;
-  try {
-    const data = await adminJson('/work-orders/import-excel', { method: 'POST', body: formData }, '匯入失敗');
-    result.className = 'excel-result show ok';
-    result.textContent = `匯入完成：新增 ${data.imported || data.created || 0} 筆，略過 ${data.skipped || 0} 筆`;
-    await loadAdminConsole();
-  } catch (error) {
-    result.className = 'excel-result show err';
-    result.textContent = app.formatError(error, 'Excel 匯入失敗');
-  } finally {
-    input.value = '';
-  }
+  if (!app) return;
+  await window.previewWorkOrderExcel({
+    input, result: app.$('adminExcelResult'),
+    request: (path, options) => adminJson(path, options, 'Excel 匯入失敗'),
+    onSuccess: loadAdminConsole,
+    formatError: (error, fallback) => app.formatError(error, fallback),
+  });
 }
 
 async function patchAdminUser(userId, payload) {
@@ -1115,31 +1204,19 @@ async function toggleAdminUser(userId, active) {
   await patchAdminUser(userId, { active });
 }
 
-async function resetAdminPassword(userId) {
+function resetAdminPassword(userId) {
   const app = adminApp();
-  if (!app) {
-    return;
-  }
-  const password = window.prompt(`${userId} 的新密碼`, '');
-  if (!password) {
-    return;
-  }
-  const user = (app.getState('adminUsers') || []).find((item) => String(item.user_id || '') === String(userId));
-  const body = {
-    password,
-    ...(user?.updated_at ? { expected_updated_at: user.updated_at } : {}),
-  };
-  try {
-    await adminJson(`/users/${encodeURIComponent(userId)}/password`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    }, '密碼重設失敗');
-    setAdminResult('adminUserResult', `${userId} 密碼已重設，既有 Session 已撤銷`);
-    await loadAdminSessions();
-  } catch (error) {
-    setAdminResult('adminUserResult', app.formatError(error, '密碼重設失敗'), true);
-  }
+  if (!app) return;
+  const user = (app.getState('adminUsers') || []).find(item => String(item.user_id) === String(userId));
+  if (!user) return;
+  window.PasswordSettings.openReset(user, async () => {
+    setAdminResult('adminUserResult', `${userId} 臨時密碼已設定，原密碼與所有登入已失效；請本人登入後設定個人密碼。`);
+    try {
+      await loadAdminConsole();
+    } catch (_) {
+      setAdminResult('adminUserResult', `${userId} 臨時密碼已設定；清單重新載入失敗，請重新整理。`);
+    }
+  });
 }
 
 async function revokeAdminUserSessions(userId) {
@@ -1182,6 +1259,20 @@ async function createAdminUser() {
   }
 }
 
+async function uploadAdminUserExcel(input) {
+  const app = adminApp();
+  return window.previewUserExcel({ input, result: app.$('adminUserExcelResult'),
+    request: (url, options) => app.apiJson(url, options), onSuccess: loadAdminConsole,
+    formatError: (error, fallback) => app.formatError(error, fallback) });
+}
+
+async function loadAdminImportHistory() {
+  const app = adminApp();
+  if (!app?.$('adminBatchHistory')) return;
+  return window.renderImportHistory({ target: app.$('adminBatchHistory'), kind: app.$('adminBatchKind').value,
+    request: (url, options) => app.apiJson(url, options) });
+}
+
 async function loadAdminConsole() {
   const app = adminApp();
   if (!app) {
@@ -1209,6 +1300,7 @@ async function loadAdminConsole() {
     renderAdminOpsSummary(users, entries, settings, feedbackStats, workStats);
     renderAdminUsers(users);
     renderAdminImportLog(entries);
+    await loadAdminImportHistory();
     renderAdminAudit(entries, settings);
     renderAdminQuality(feedbackStats, workOrders);
     await loadAdminKb();
@@ -1219,12 +1311,51 @@ async function loadAdminConsole() {
   }
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  if (!await window.AlarmApp?.loadCompanyConfig()) return;
   const app = adminApp();
   if (!app) {
     return;
   }
   app.initCommonPageBindings();
+  let companyPreview = null;
+  const previewOutput = app.$('companyConfigPreview');
+  const applyButton = app.$('applyCompanyConfig');
+  app.$('companyConfigFile')?.addEventListener('change', () => {
+    companyPreview = null;
+    applyButton.disabled = true;
+    previewOutput.textContent = '';
+  });
+  app.$('previewCompanyConfig')?.addEventListener('click', async () => {
+    companyPreview = null;
+    applyButton.disabled = true;
+    try {
+      const file = app.$('companyConfigFile').files[0];
+      if (!file) throw new Error('請先選擇公司設定 JSON');
+      if (file.size > 1000000) throw new Error('設定檔不可超過 1 MB');
+      const config = JSON.parse(await file.text());
+      const result = await adminJson('/company-config/preview', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ config }),
+      }, '公司設定驗證失敗');
+      companyPreview = { config: result.after.config, expected_revision: result.expected_revision };
+      previewOutput.textContent = JSON.stringify({ before: result.before, after: result.after }, null, 2);
+      applyButton.disabled = false;
+    } catch (error) {
+      previewOutput.textContent = app.formatError(error, '設定預覽失敗');
+    }
+  });
+  applyButton?.addEventListener('click', async () => {
+    if (!companyPreview) return;
+    applyButton.disabled = true;
+    try {
+      await adminJson('/company-config', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(companyPreview) }, '套用失敗');
+      window.location.reload();
+    } catch (error) {
+      companyPreview = null;
+      previewOutput.textContent = app.formatError(error, '套用失敗，請重新預覽');
+    }
+  });
   app.$('adminUserLabel').textContent = `${app.currentUserId()} (${app.currentUserRole()})`;
   app.$('adminKbCollection')?.addEventListener('change', loadAdminKb);
   app.$('adminKbSearch')?.addEventListener('input', renderAdminKbDocuments);
@@ -1262,6 +1393,8 @@ window.saveAdminSettings = saveAdminSettings;
 window.saveAdminUser = saveAdminUser;
 window.toggleAdminUser = toggleAdminUser;
 window.createAdminUser = createAdminUser;
+window.uploadAdminUserExcel = uploadAdminUserExcel;
+window.loadAdminImportHistory = loadAdminImportHistory;
 window.resetAdminPassword = resetAdminPassword;
 window.revokeAdminUserSessions = revokeAdminUserSessions;
 window.loadAdminSessions = loadAdminSessions;
@@ -1272,4 +1405,8 @@ window.rebuildAllAdminKb = rebuildAllAdminKb;
 window.exportAdminKbCsv = exportAdminKbCsv;
 window.exportAdminQualityCsv = exportAdminQualityCsv;
 window.selectAdminSection = selectAdminSection;
+window.openAdminWorkOrder = openAdminWorkOrder;
+window.closeAdminWorkOrder = closeAdminWorkOrder;
 window.reviewAdminKnowledge = reviewAdminKnowledge;
+window.cancelAdminKnowledgeReview = cancelAdminKnowledgeReview;
+window.submitAdminKnowledgeReview = submitAdminKnowledgeReview;

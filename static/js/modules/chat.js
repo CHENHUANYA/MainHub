@@ -109,7 +109,7 @@ function appendMessage(role, content, rag = null) {
     const pageTag = citation?.page || null;
     const codeTag = citation?.code || null;
     const titleTag = citation?.title || citation?.document_title || null;
-    const collection = app.getState('chatCollection') || '808d';
+    const collection = app.getState('chatCollection') || window.AlarmApp.getState('defaultManual');
 
     const cleaned = stripMetaComments(content);
     bubble.innerHTML = renderMarkdown(cleaned);
@@ -232,7 +232,7 @@ async function saveMsgToKB(msgIdx, btn) {
   const text = tempDiv.textContent.trim();
   if (!text) return;
 
-  const collection = app.getState('chatCollection') || '808d';
+  const collection = app.getState('chatCollection') || window.AlarmApp.getState('defaultManual');
 
   btn.disabled = true;
   btn.textContent = '⏳ 儲存中...';

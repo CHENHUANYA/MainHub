@@ -7,13 +7,13 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from services.chat_completion import strip_reserved_citation_comments
+from services.evidence_guard import mock_evidence_notice
+from services.answer_format import requires_answer_check
 
 
 @dataclass(frozen=True)
 class StreamDependencies:
-    provider_name: str
     ollama_model: str
-    school_model: str
     is_troubleshooting_query: Callable[[str], bool]
     stream_ollama: Any
     call_with_retrieval_guard: Any
@@ -50,11 +50,15 @@ async def stream_chat_events(
     provider = "unavailable"
     answer_state = "complete"
     try:
-        if dependencies.provider_name == "ollama" and not dependencies.is_troubleshooting_query(user_query):
+        if not dependencies.is_troubleshooting_query(user_query) and not requires_answer_check(messages):
             async for content_part in dependencies.stream_ollama(messages, temperature, max_tokens):
-                content_part = strip_reserved_citation_comments(content_part)
+                # A standalone newline is a valid token after generation starts.
+                # Trimming every chunk collapses verbatim headings and sentences.
+                content_part = strip_reserved_citation_comments(content_part, strip_leading_newlines=first_event)
                 if not content_part:
                     continue
+                if first_event:
+                    content_part = mock_evidence_notice(docs) + content_part
                 parts.append(content_part)
                 yield dependencies.make_sse_chunk(
                     content_part,
@@ -75,7 +79,7 @@ async def stream_chat_events(
             )
             if not content:
                 raise RuntimeError("LLM returned empty response")
-            content = strip_reserved_citation_comments(content)
+            content = mock_evidence_notice(docs) + strip_reserved_citation_comments(content)
             parts.append(content)
             provider = dependencies.provider_source()
             yield dependencies.make_sse_chunk(content, rag=rag_metadata, response_id=response_id)
@@ -92,7 +96,7 @@ async def stream_chat_events(
         raise
     except Exception as exc:
         dependencies.record_error(collection_name, user_query, docs, exc)
-        if parts and dependencies.provider_source() in {"ollama", "school"}:
+        if parts and dependencies.provider_source() == "ollama":
             provider = dependencies.provider_source()
             answer_state = "fallback"
         else:
@@ -100,6 +104,8 @@ async def stream_chat_events(
         fallback = dependencies.unavailable_message(exc, docs)
         if parts:
             fallback = f"\n\n{fallback}"
+        else:
+            fallback = mock_evidence_notice(docs) + fallback
         parts.append(fallback)
         yield dependencies.make_sse_chunk(
             fallback,
@@ -112,11 +118,7 @@ async def stream_chat_events(
     if answer_state == "complete":
         answer_state = dependencies.classify_answer_state(provider)
     dependencies.record_query(collection_name, user_query, source="api-stream", elapsed_ms=elapsed_ms)
-    model = (
-        dependencies.school_model
-        if provider == "school"
-        else dependencies.ollama_model if provider == "ollama" else ""
-    )
+    model = dependencies.ollama_model if provider == "ollama" else ""
     await dependencies.save_answer(
         answer_id=response_id,
         query=user_query,

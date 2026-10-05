@@ -41,7 +41,7 @@ function loadAdminPage(user) {
     AlarmApp: app,
     addEventListener: () => {},
     location: { hash: '' },
-    prompt: () => 'strong-password',
+    PasswordSettings: { openReset: (target, onSuccess) => calls.push({ target, onSuccess }) },
   };
   const context = {
     Blob,
@@ -59,7 +59,7 @@ function loadAdminPage(user) {
   return { calls, window };
 }
 
-test('admin password reset submits the displayed user version and shows success', async () => {
+test('admin password reset opens confirmation with the displayed user version without writing', async () => {
   const { calls, window } = loadAdminPage({
     user_id: 'operator01',
     updated_at: '2026-08-14T08:00:00+00:00',
@@ -67,16 +67,10 @@ test('admin password reset submits the displayed user version and shows success'
 
   await window.resetAdminPassword('operator01');
 
-  assert.equal(calls[0].path, '/users/operator01/password');
-  assert.deepEqual(
-    JSON.parse(calls[0].options.body),
-    {
-      password: 'strong-password',
-      expected_updated_at: '2026-08-14T08:00:00+00:00',
-    },
-  );
-  assert.equal(window.AlarmApp.$('adminUserResult').textContent, 'operator01 密碼已重設，既有 Session 已撤銷');
-  assert.equal(window.AlarmApp.$('adminUserResult').className, 'upload-result show');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].target.user_id, 'operator01');
+  assert.equal(calls[0].target.updated_at, '2026-08-14T08:00:00+00:00');
+  assert.equal(typeof calls[0].onSuccess, 'function');
 });
 
 test('legacy users without a version can still reset their password', async () => {
@@ -84,5 +78,6 @@ test('legacy users without a version can still reset their password', async () =
 
   await window.resetAdminPassword('operator01');
 
-  assert.deepEqual(JSON.parse(calls[0].options.body), { password: 'strong-password' });
+  assert.equal(calls[0].target.user_id, 'operator01');
+  assert.equal(calls[0].target.updated_at, undefined);
 });

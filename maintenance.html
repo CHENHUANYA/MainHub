@@ -5,8 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>維修工作台</title>
   <link rel="stylesheet" href="/static/css/tokens.css?v=1">
-  <link rel="stylesheet" href="/static/css/maintenance.css?v=quality-3">
-  <link rel="stylesheet" href="/static/css/utilities.css?v=csp-1">
+  <link rel="stylesheet" href="/static/css/maintenance.css?v=save-feedback-1">
+  <link rel="stylesheet" href="/static/css/utilities.css?v=company-header-1">
+  <link rel="stylesheet" href="/static/css/password-settings.css?v=1">
   <link rel="stylesheet" href="/static/css/accessibility.css?v=1">
 </head>
 <body data-page="maintenance">
@@ -61,9 +62,10 @@
         <span>工單看板</span>
         <button class="wo-btn alt" data-on-click="loadMaintenanceData">重整</button>
       </div>
+      <div id="mtWorkResult" class="maintenance-save-notice u-hidden" role="status" aria-live="polite" aria-atomic="true" tabindex="-1"></div>
       <div class="maintenance-filter-row">
         <select class="wo-select" id="mtWorkView" aria-label="工單檢視範圍">
-          <option value="active">進行中 / 待驗證</option>
+          <option value="active">進行中 / 待驗證 / 待補充</option>
           <option value="verified">已驗證封存</option>
           <option value="all">全部未封存</option>
           <option value="unassigned">未指派</option>
@@ -100,18 +102,7 @@
   <div class="container">
     <div class="section-label">維修查詢</div>
     <div class="manual-grid">
-      <button class="manual-btn active" data-name="808d" data-on-click="selectManual" data-action-target>
-        <div class="mb-code">808D</div>
-      </button>
-      <button class="manual-btn" data-name="840d" data-on-click="selectManual" data-action-target>
-        <div class="mb-code">840D / 840Di / 810D</div>
-      </button>
-      <button class="manual-btn" data-name="840dsl" data-on-click="selectManual" data-action-target>
-        <div class="mb-code">840D sl</div>
-      </button>
-      <button class="manual-btn" data-name="furnace_b85t" data-on-click="selectManual" data-action-target>
-        <div class="mb-code">FURNACE B85T</div>
-      </button>
+      <span data-company-buttons="lookup">載入知識庫…</span>
     </div>
 
     <div class="section-label">輸入警報代碼或問題描述</div>
@@ -168,10 +159,7 @@
 <div class="panel" id="panel-chat">
   <div class="container u-max-w-820">
     <div class="chat-manual-bar">
-      <button class="chat-manual-btn active" data-col="808d" data-on-click="selectChatManual" data-action-target>808D</button>
-      <button class="chat-manual-btn" data-col="840d" data-on-click="selectChatManual" data-action-target>840D / 840Di / 810D</button>
-      <button class="chat-manual-btn" data-col="840dsl" data-on-click="selectChatManual" data-action-target>840D sl</button>
-      <button class="chat-manual-btn" data-col="furnace_b85t" data-on-click="selectChatManual" data-action-target>FURNACE B85T</button>
+      <span data-company-buttons="chat">載入知識庫…</span>
       <span class="chat-mode-badge">RAG + LLM</span>
     </div>
 
@@ -209,7 +197,7 @@
     <div class="maintenance-timeline" id="mtWorkTimeline"></div>
     <div class="maintenance-verify-note u-hidden" id="mtKnowledgeReview"></div>
     <div class="wo-modal-grid">
-      <div><div class="wo-note">狀態</div><select class="wo-select" id="mtEditStatus" aria-label="工單狀態"><option value="pending">待處理</option><option value="assigned">已指派</option><option value="in_progress">進行中</option><option value="completed">已完成</option><option value="cancelled">已取消</option></select></div>
+      <div><div class="wo-note">狀態</div><select class="wo-select" id="mtEditStatus" aria-label="工單狀態"><option value="pending">待處理</option><option value="assigned">已指派</option><option value="in_progress">進行中</option><option value="completed">已完成</option><option value="verified" disabled>已驗證</option><option value="cancelled">已取消</option></select></div>
       <div><div class="wo-note">優先等級</div><select class="wo-select" id="mtEditPriority" aria-label="工單優先等級"><option value="low">低</option><option value="medium">中</option><option value="high">高</option><option value="critical">緊急</option></select></div>
       <div><div class="wo-note">負責人</div><input class="wo-input" id="mtEditAssignee" aria-label="工單負責人"></div>
       <div><div class="wo-note">機台</div><input class="wo-input" id="mtEditMachine" aria-label="工單機台"></div>
@@ -219,8 +207,8 @@
     <div class="wo-note u-mt-10">處理結果 / 解決方案</div><textarea class="wo-text" id="mtEditResolution" aria-label="處理結果或解決方案"></textarea>
     <div class="wo-note u-mt-10">備註</div><textarea class="wo-text" id="mtEditNotes" aria-label="工單備註"></textarea>
     <div class="wo-modal-grid u-mt-10">
-      <div><div class="wo-note">接受人員</div><input class="wo-input" id="mtEditAcceptedBy" aria-label="接受人員"></div>
-      <div><div class="wo-note">完成人員</div><input class="wo-input" id="mtEditCompletedBy" aria-label="完成人員"></div>
+      <div><div class="wo-note">接受人員</div><input class="wo-input" id="mtEditAcceptedBy" aria-label="接受人員" readonly></div>
+      <div><div class="wo-note">完成人員</div><input class="wo-input" id="mtEditCompletedBy" aria-label="完成人員" readonly></div>
       <div><div class="wo-note">根本原因</div><input class="wo-input" id="mtEditRootCause" aria-label="根本原因"></div>
       <div><div class="wo-note">故障分類</div><input class="wo-input" id="mtEditFailureCategory" aria-label="故障分類"></div>
       <div><div class="wo-note">LLM 正確率回饋</div><select class="wo-select" id="mtEditLlmCorrectness" aria-label="LLM 正確率回饋"><option value="">未評估</option><option value="correct">正確</option><option value="partially_correct">部分正確</option><option value="incorrect">不正確</option><option value="unknown">未知</option></select></div>
@@ -232,18 +220,20 @@
       閉環規則：維修完成時需填寫根本原因與實際維修動作；工單需由 Operator 或 Supervisor 驗證後才會正式關閉。
     </div>
     <div class="wo-actions">
-      <button class="wo-btn" data-on-click="saveMaintenanceWorkOrder">儲存</button>
-      <button class="wo-btn danger" data-on-click="deleteMaintenanceWorkOrder">刪除</button>
+      <button class="wo-btn" id="mtSaveOrder" data-on-click="saveMaintenanceWorkOrder">儲存</button>
+      <button class="wo-btn danger" id="mtDeleteOrder" data-on-click="deleteMaintenanceWorkOrder">刪除</button>
     </div>
+    <p id="mtSaveResult" class="u-text-danger" role="alert"></p>
   </div>
 </div>
 
 <script src="/static/js/core/api.js"></script>
 <script src="/static/js/core/storage.js"></script>
-<script src="/static/alarm_app.js"></script>
+<script src="/static/alarm_app.js?v=password-1"></script>
 <script src="/static/js/modules/chat.js"></script>
 <script src="/static/js/modules/lookup.js"></script>
-<script src="/static/js/modules/audit.js"></script>
-<script src="/static/js/pages/maintenance.js?v=quality-2"></script>
+<script src="/static/js/modules/audit.js?v=audit-readable-2"></script>
+<script src="/static/js/pages/maintenance.js?v=save-feedback-1"></script>
+<script src="/static/js/modules/password-settings.js?v=1"></script>
 </body>
 </html>

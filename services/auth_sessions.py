@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -12,6 +13,13 @@ from services.json_file_store import exclusive_file_lock, write_json_atomic
 
 
 T = TypeVar("T")
+
+
+def session_cookie_name(configured: str) -> str:
+    name = configured.strip() or "alarm_rag_session"
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", name):
+        raise ValueError("SESSION_COOKIE_NAME must contain 1-64 letters, digits, underscores or hyphens")
+    return name
 
 
 def session_cookie_secure(configured: str, request_scheme: str, forwarded_proto: str) -> bool:

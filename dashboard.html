@@ -6,7 +6,8 @@
   <title>SINUMERIK 智慧儀表板</title>
   <link rel="stylesheet" href="/static/css/tokens.css?v=1">
   <link rel="stylesheet" href="/static/css/dashboard.css?v=quality-2">
-  <link rel="stylesheet" href="/static/css/utilities.css?v=csp-1">
+  <link rel="stylesheet" href="/static/css/utilities.css?v=company-header-1">
+  <link rel="stylesheet" href="/static/css/password-settings.css?v=1">
   <link rel="stylesheet" href="/static/css/accessibility.css?v=1">
 </head>
 <body data-page="dashboard">
@@ -126,11 +127,7 @@
         <div class="section-label">🚨 模擬觸發</div>
         <div class="test-row">
           <input class="test-input" id="testCode" type="text" placeholder="警報代碼" value="3000" aria-label="模擬警報代碼">
-          <select class="test-select" id="testManual" aria-label="模擬警報手冊">
-            <option value="808d">808D</option>
-            <option value="840d">840D</option>
-            <option value="840dsl">840D sl</option>
-          </select>
+          <select class="test-select" id="testManual" aria-label="模擬警報手冊" data-company-collections><option value="">載入知識庫…</option></select>
           <button class="trigger-btn" data-on-click="testTrigger">🚨 模擬觸發</button>
         </div>
       </div>
@@ -258,12 +255,13 @@
 
 <script src="/static/js/core/api.js"></script>
 <script src="/static/js/core/storage.js"></script>
-<script src="/static/alarm_app.js"></script>
+<script src="/static/alarm_app.js?v=password-1"></script>
 <script src="/static/js/modules/alarm.js"></script>
 <script src="/static/js/modules/chat.js"></script>
 <script src="/static/js/modules/lookup.js"></script>
 <script src="/static/js/modules/operations.js"></script>
 <script src="/static/js/pages/dashboard.js?v=quality-2"></script>
 
+<script src="/static/js/modules/password-settings.js?v=1"></script>
 </body>
 </html>

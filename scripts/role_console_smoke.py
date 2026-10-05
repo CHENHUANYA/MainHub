@@ -175,13 +175,8 @@ def main() -> int:
         runner.record("login:supervisor01", False, str(exc))
         supervisor_password = ""
     supervisor_token = runner.login("supervisor01", supervisor_password, record_result=False) if supervisor_password else ""
-    if (
-        not supervisor_token
-        and supervisor_password
-        and admin_token
-        and runner.reset_user_password("supervisor01", supervisor_password, admin_token)
-    ):
-        supervisor_token = runner.login("supervisor01", supervisor_password, record_result=False)
+    # Password recovery now issues a temporary password requiring owner rotation.
+    # A smoke check must use a prepared personal test password, not reset accounts.
     runner.record("login:supervisor01", bool(supervisor_token), "token=yes" if supervisor_token else "token=no")
     if admin_token:
         check_admin_console(runner, admin_token)

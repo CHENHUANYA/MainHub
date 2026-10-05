@@ -134,13 +134,13 @@ uvicorn main:app
 `load_dotenv_defaults()` 讀取 `.env` 中 `名稱=值` 的設定，例如：
 
 ```text
-LLM_PROVIDER=ollama
+OLLAMA_MODEL=gemma4:e2b
 VECTOR_STORE=qdrant
 ```
 
 程式使用 `os.environ.setdefault()`：既有環境變數不存在時，才採用 `.env` 的值。
 
-例如 `.env` 指定 Ollama，但容器環境已指定 School API，既有容器設定會保留。因此介紹實驗配置時，要依實際生效設定，而非只讀某一個檔案。
+例如 `.env` 指定新模型，但容器仍保有舊的模型名稱，執行時設定可能不同。因此修改模型後需重建容器，介紹實驗配置時要確認實際生效設定。
 
 ### 1.3 建立應用程式並加入中介層
 
@@ -711,9 +711,9 @@ model = 空值
 
 ### 5.7 語言模型提供者與替代路徑
 
-不走規則回答時，由 `call_llm()` 選擇 Ollama 或 School／相容 API。
+不走規則回答時，由 `call_llm()` 呼叫本機 Ollama。
 
-School API 發生特定網路或伺服器錯誤，可依設定切到 Ollama；部分 HTTP 4xx 等錯誤則不會自動切換。不能假設所有失敗都有相同處理。
+Ollama 無法連線或產生回答失敗時，系統回傳明確錯誤與可用的來源資訊，不會切換外部模型。
 
 Ollama 是模型服務工具；Mistral Nemo 是設定中用來生成回答的模型，兩者角色不同。
 
@@ -962,10 +962,10 @@ ok = data.get("status") == "ok" and indexed
 | --- | --- | --- |
 | Embedding | `mixedbread-ai/mxbai-embed-large-v1` | 文字轉向量 |
 | Reranker | `cross-encoder/ms-marco-MiniLM-L-6-v2` | 候選重新排序 |
-| 回答模型 | `mistral-nemo:latest` | 產生回答文字 |
+| 回答模型 | `gemma4:e2b` | 產生回答文字 |
 | 提供者 | `ollama` | 執行或提供模型呼叫服務 |
 
-程式也支援 School API。本次本機設定選 Ollama，不能說每個回答都使用學校 API。Compose 的部分模型備援預設與 `.env.example`、本機設定不同，正式實驗必須記錄當次實際配置。
+目前只支援本機 Ollama，預設回答模型為 `gemma4:e2b`。`.env.example`、Compose 與程式預設已同步；正式實驗仍需記錄當次實際模型與設定。
 
 ### Qdrant、JSON 與 PostgreSQL
 

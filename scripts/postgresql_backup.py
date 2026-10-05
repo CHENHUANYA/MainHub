@@ -19,6 +19,7 @@ RPO_HOURS = 24
 RTO_HOURS = 2
 TABLES = (
     "users",
+    "import_batches",
     "sessions",
     "login_throttles",
     "alarm_events",

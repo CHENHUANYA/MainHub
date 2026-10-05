@@ -6,7 +6,7 @@
   <title>Alarm RAG 登入</title>
   <meta name="description" content="Alarm RAG 角色式維修工作台登入">
   <link rel="stylesheet" href="/static/css/tokens.css?v=1">
-  <link rel="stylesheet" href="/static/css/login.css">
+  <link rel="stylesheet" href="/static/css/login.css?v=password-type-1">
   <link rel="stylesheet" href="/static/css/accessibility.css?v=1">
 </head>
 <body data-page="login">
@@ -30,7 +30,7 @@
         </div>
         <div>
           <h1 class="lg-title">ALARM RAG</h1>
-          <p class="lg-subtitle">SINUMERIK 警報查詢與維修流程</p>
+          <p class="lg-subtitle">設備查詢與維修流程</p>
         </div>
       </div>
 
@@ -58,45 +58,32 @@
         <div class="upload-result" id="loginResult"></div>
       </form>
 
-      <div class="lg-divider"><span>角色帳號</span></div>
-      <div class="lg-accounts">
-        <div class="lg-account">
-          <div class="lg-account-icon lg-account-icon--blue" aria-hidden="true"></div>
-          <div class="lg-account-info">
-            <b>Operator</b>
-            <span>Operator，LINE-A</span>
-          </div>
+      <form class="lg-form" id="initialPasswordForm" hidden>
+        <p class="lg-description">首次登入或使用臨時密碼時，請先設定自己的個人密碼，完成後以新密碼登入。</p>
+        <div class="lg-field">
+          <label class="lg-label" for="initialNewPassword">新密碼（至少 8 個字元）</label>
+          <input class="lg-input" id="initialNewPassword" type="password" autocomplete="new-password" minlength="8" required>
         </div>
-        <div class="lg-account">
-          <div class="lg-account-icon lg-account-icon--green" aria-hidden="true"></div>
-          <div class="lg-account-info">
-            <b>Maintenance</b>
-            <span>維修技師</span>
-          </div>
+        <div class="lg-field">
+          <label class="lg-label" for="initialConfirmPassword">再次輸入新密碼</label>
+          <input class="lg-input" id="initialConfirmPassword" type="password" autocomplete="new-password" minlength="8" required>
         </div>
-        <div class="lg-account">
-          <div class="lg-account-icon lg-account-icon--amber" aria-hidden="true"></div>
-          <div class="lg-account-info">
-            <b>Supervisor</b>
-            <span>主管儀表板</span>
-          </div>
-        </div>
-        <div class="lg-account">
-          <div class="lg-account-icon lg-account-icon--purple" aria-hidden="true"></div>
-          <div class="lg-account-info">
-            <b>Admin</b>
-            <span>系統管理</span>
-          </div>
-        </div>
-      </div>
+        <button class="lg-submit" id="initialPasswordSubmit" type="submit">設定新密碼</button>
+        <button class="lg-submit" id="initialPasswordCancel" type="button">返回登入</button>
+        <div class="upload-result" id="initialPasswordResult" role="status" aria-live="polite"></div>
+      </form>
 
       <div class="lg-hint">
-        <span id="loginConfigHint">請使用 <code>ADMIN_INITIAL_PASSWORD</code> 設定的密碼，或從管理後台重設。</span>
+        <span id="loginConfigHint">請輸入管理員提供的帳號及密碼；首次登入會引導設定個人密碼。</span>
       </div>
+      <details class="lg-hint">
+        <summary>忘記密碼？</summary>
+        <p>請聯絡公司管理員確認身分並取得臨時密碼。登入後由你設定個人密碼；若仍記得目前密碼，可登入後按頁首「更改密碼」。</p>
+      </details>
     </section>
   </main>
 
-  <script src="/static/js/core/api.js?v=auth-4"></script>
-  <script src="/static/js/pages/login.js?v=auth-4"></script>
+  <script src="/static/js/core/api.js?v=auth-5"></script>
+  <script src="/static/js/pages/login.js?v=password-zh-1"></script>
 </body>
 </html>

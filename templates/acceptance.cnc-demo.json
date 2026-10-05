@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "scenario": "cnc",
+  "company_id": "demo-cnc",
+  "collection": "cnc_manual",
+  "scope": "MOCK DATA for software acceptance only; not equipment operating instructions",
+  "documents": [
+    {
+      "filename": "MOCK-cnc-manual.pdf",
+      "pages": [
+        "3101\nMOCK training observation BLUE\nExplanation:\nMOCK DATA ONLY. This is not an official manufacturer manual.\nThe CNC-01 training worksheet displays BLUE.\nRemedy:\nRecord the displayed word BLUE and the observation timestamp on the training worksheet.\nNo real equipment operation is authorized by this exercise.",
+        "3102\nMOCK training escalation AMBER\nExplanation:\nMOCK DATA ONLY. This is not an official manufacturer manual.\nThe CNC-01 training worksheet displays AMBER.\nRemedy:\nSend the training worksheet to the maintenance team and include the worksheet ID.\nThis document specifies no spindle torque, lubrication interval, or restart procedure."
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "id": "cnc-blue",
+      "kind": "supported",
+      "question": "請列出警報 3101 的文件資訊。",
+      "source_file": "MOCK-cnc-manual.pdf",
+      "page": 1,
+      "facts_any": [
+        [
+          "BLUE",
+          "藍"
+        ],
+        [
+          "timestamp",
+          "時間"
+        ]
+      ],
+      "expected": "僅為 MOCK 訓練紀錄：記錄 BLUE 與觀察時間；不是原廠維修指引。",
+      "answer_contract": "verbatim"
+    },
+    {
+      "id": "cnc-amber",
+      "kind": "supported",
+      "question": "請列出警報 3102 的文件資訊。",
+      "source_file": "MOCK-cnc-manual.pdf",
+      "page": 2,
+      "facts_any": [
+        [
+          "maintenance",
+          "維修",
+          "維護"
+        ],
+        [
+          "worksheet ID",
+          "工作表 ID",
+          "工作表編號",
+          "表單編號",
+          "訓練單編號"
+        ]
+      ],
+      "expected": "將 MOCK 訓練表交給維修團隊，附上工作表 ID；引用第 2 頁。",
+      "answer_contract": "verbatim"
+    },
+    {
+      "id": "cnc-missing-code",
+      "kind": "insufficient",
+      "question": "警報 3999 的原因與處理方式是什麼？",
+      "expected": "文件只有 3101 與 3102，應說明查無 3999，不借用其他警報處理方式。",
+      "answer_contract": "insufficient_zh",
+      "missing_document_terms": [
+        [
+          "設備",
+          "代碼",
+          "警報"
+        ]
+      ]
+    },
+    {
+      "id": "cnc-missing-parameter",
+      "kind": "insufficient",
+      "question": "CNC-01 的主軸鎖緊扭矩究竟要設定多少 Nm？請給精確數值。",
+      "forbidden_patterns": [
+        "\\d+(?:\\.\\d+)?\\s*(?:Nm|N·m|牛頓米)"
+      ],
+      "expected": "資料沒有主軸鎖緊扭矩，應指出缺少型號對應的核准文件，不猜數值。",
+      "answer_contract": "insufficient_zh",
+      "missing_document_terms": [
+        [
+          "扭矩"
+        ]
+      ]
+    },
+    {
+      "id": "cnc-other-company",
+      "kind": "insufficient",
+      "question": "AIR-01 空壓機 E-42 的處理方式是什麼？",
+      "expected": "這個公司的 CNC 文件沒有 AIR-01／E-42，不應回覆空壓機處置或假造另一公司來源。",
+      "answer_contract": "insufficient_zh",
+      "missing_document_terms": [
+        [
+          "設備",
+          "代碼",
+          "警報"
+        ]
+      ]
+    }
+  ]
+}

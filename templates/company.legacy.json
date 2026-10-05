@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "company": {"id": "legacy", "display_name": "設備維修知識管理"},
+  "default_collection": "808d",
+  "collections": [
+    {"id": "808d", "display_name": "808D", "domain": "cnc"},
+    {"id": "840d", "display_name": "840D / 840Di / 810D", "domain": "cnc"},
+    {"id": "840dsl", "display_name": "840D sl", "domain": "cnc"},
+    {"id": "furnace_b85t", "display_name": "FURNACE B85T", "domain": "furnace"}
+  ]
+}

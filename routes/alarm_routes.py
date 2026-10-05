@@ -41,6 +41,7 @@ from services.postgres_workflow import get_issue_for_alarm_event as postgres_get
 from services.transactions import json_transactional, postgres_transactional
 from storage import DB_PATH
 from services.ai_usage import AIUsageGuard, AIUsageLimitExceeded
+from services.company_config import resolve_manual
 from storage import ALARM_LOG_PATH, append_jsonl, read_jsonl
 from issues import _load_issues, create_issue_dict, get_issue_dict, set_issue_work_order
 from work_orders import create_order_dict, get_order_dict
@@ -254,7 +255,12 @@ async def trigger_alarm(
     if line_id is None:
         return {"status": "error", "message": "Permission denied"}
     audit_principal = integration_principal() if token_authenticated else actor_id(actor)
-    manual_name = req.manual or "808d"
+    try:
+        manual_name, line_id = resolve_manual(req.manual, req.machine_id, line_id)
+    except ValueError as exc:
+        return {"status": "error", "message": str(exc)}
+    if not token_authenticated and line_id and not line_allowed(actor, line_id):
+        return {"status": "error", "message": "Permission denied"}
     invalid_manual = validate_manual_name(manual_name)
     if invalid_manual:
         return invalid_manual

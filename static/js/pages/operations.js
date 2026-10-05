@@ -1,5 +1,6 @@
 ﻿(() => {
-  document.addEventListener('DOMContentLoaded', () => {
+  document.addEventListener('DOMContentLoaded', async () => {
+  if (!await window.AlarmApp?.loadCompanyConfig()) return;
     const app = window.AlarmApp;
     if (!app) {
       return;

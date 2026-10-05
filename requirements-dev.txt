@@ -1,6 +1,6 @@
 -r requirements-postgresql.txt
 pytest==9.0.3
-ruff==0.12.2
+ruff==0.16.10
 mypy==1.16.1
 coverage==7.15.2
 pip-audit==2.10.1
